@@ -12,6 +12,14 @@ BB's sidebar footer only offers click-to-open disclosures, so the plugin opens i
 - If another plugin opens its footer panel, the usage card steps aside and comes back when that panel closes.
 - Hide the icon from the footer (right-click → Hide from footer) or move it into More and the card stops auto-opening.
 
+## Settings
+
+Settings → Plugins → Usage Bar → Display, or the sliders button in the card. Prefs are stored on the BB server, so every window and device agrees.
+
+- Compact mode: one line per provider with small bars and the percentage left. Hover a bar for the window name and reset time. The refresh and settings buttons show on hover.
+- Hide providers you're not signed in to (on by default): drops tools that are installed but have no account, like an OpenCode you never set up. Expired sessions still show.
+- Providers and gauges: turn off any provider, or single gauges like Fable. Gauges show up in this list once the provider has reported them.
+
 ## Refresh
 
 Usage is fetched when the card mounts, every 2 minutes while the window is visible, when the window regains focus (if older than a minute), and a few seconds after a thread finishes a turn. The refresh button in the card forces a fetch.

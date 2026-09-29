@@ -5,6 +5,7 @@ Keep an eye on your Claude Code and Codex quotas without clicking anything.
 - A usage card pinned above the sidebar footer icons, visible on every screen.
 - One bar per quota window (5h session, weekly, model windows like Fable) showing the percentage left and a reset countdown.
 - Colors that turn amber at 80% and red at 95%.
+- A compact one-line-per-provider mode, and settings to hide providers or single gauges you don't care about.
 
 ## How it works
 

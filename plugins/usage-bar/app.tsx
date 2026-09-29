@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   definePluginApp,
   experimental_ProviderIcon as ProviderIcon,
@@ -17,9 +17,12 @@ import {
   shortWindowLabel,
   subscribeUsage,
   usageTone,
-  type ProviderUsage,
   type UsageWindow,
 } from "./usage";
+import { windowKey } from "./prefs";
+import { usePrefs } from "./use-prefs";
+import { useUsageRows, type UsageRow } from "./rows";
+import { UsageSettings } from "./settings";
 
 const DISCLOSURE_ID = "usage";
 const PINNED_STORAGE_KEY = "bb.usage-bar.pinned.v1";
@@ -50,15 +53,45 @@ function setPinned(value: boolean): void {
   } catch {}
 }
 
+// No SDK navigation to plugin settings; BB uses a BrowserRouter, which follows popstate.
+function openSettings(pluginId: string): void {
+  window.history.pushState(null, "", `/settings/plugins/${encodeURIComponent(pluginId)}`);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+let settingsPluginId = "usage-bar";
+
 const BAR_CLASS = {
   ok: "bg-primary",
   warning: "bg-warning",
   critical: "bg-destructive",
 } as const;
 
+const TEXT_CLASS = {
+  ok: "text-sidebar-foreground",
+  warning: "text-warning",
+  critical: "text-destructive",
+} as const;
+
+// Bars show what's left, like a battery; tone still follows consumption.
+function remainingOf(window: UsageWindow): number {
+  return Math.max(0, Math.min(100, 100 - window.usedPercent));
+}
+
+function Bar({ window, className }: { window: UsageWindow; className?: string }) {
+  return (
+    <span className={cn("min-w-0 overflow-hidden rounded-full bg-sidebar-border", className)}>
+      <span
+        className={cn(
+          "block h-full rounded-full transition-[width] duration-300",
+          BAR_CLASS[usageTone(window.usedPercent)],
+        )}
+        style={{ width: `${remainingOf(window)}%` }}
+      />
+    </span>
+  );
+}
+
 function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
-  // Bars show what's left, like a battery; tone still follows consumption.
-  const remaining = Math.max(0, Math.min(100, 100 - window.usedPercent));
   const tone = usageTone(window.usedPercent);
   return (
     <div
@@ -66,23 +99,9 @@ function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
       title={describeWindow(window)}
     >
       <span className="truncate text-subtle-foreground">{shortWindowLabel(window)}</span>
-      <span className="h-1.5 min-w-0 overflow-hidden rounded-full bg-sidebar-border">
-        <span
-          className={cn("block h-full rounded-full transition-[width] duration-300", BAR_CLASS[tone])}
-          style={{ width: `${remaining}%` }}
-        />
-      </span>
-      <span
-        className={cn(
-          "text-right tabular-nums",
-          tone === "critical"
-            ? "text-destructive"
-            : tone === "warning"
-              ? "text-warning"
-              : "text-sidebar-foreground",
-        )}
-      >
-        {Math.round(remaining)}%
+      <Bar window={window} className="h-1.5" />
+      <span className={cn("text-right tabular-nums", TEXT_CLASS[tone])}>
+        {Math.round(remainingOf(window))}%
       </span>
       <span className="text-right tabular-nums text-subtle-foreground">
         {formatCountdown(window.resetsAt, now) ?? "—"}
@@ -91,26 +110,123 @@ function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
   );
 }
 
-function statusMessage(usage: ProviderUsage): string | null {
-  switch (usage.status) {
-    case "ok":
-      return usage.windows.length === 0 ? "No limits reported" : null;
-    case "unauthenticated":
-      return "Sign in to see usage";
-    case "expired":
-      return "Session expired, sign in again";
-    case "error":
-      return "Couldn’t load usage";
-    case "not_installed":
-      return null;
-  }
+function ProviderBlock({ row, now }: { row: UsageRow; now: number }) {
+  const { provider, usage, windows, message } = row;
+  return (
+    <section aria-label={`${provider.displayName} usage`} className="min-w-0">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <ProviderIcon
+          providerKind="agent"
+          provider={provider}
+          fallback="Bot"
+          className="size-3.5 shrink-0"
+          aria-hidden
+        />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-sidebar-foreground">
+          {provider.displayName}
+        </span>
+        {usage.status === "ok" && usage.planLabel !== null ? (
+          <span className="shrink-0 rounded-sm bg-sidebar-border/60 px-1 py-0.5 text-2xs leading-none text-subtle-foreground">
+            {usage.planLabel}
+          </span>
+        ) : null}
+      </div>
+      {message !== null ? (
+        <p
+          className="mt-0.5 pl-5 text-2xs text-muted-foreground"
+          title={usage.status === "error" ? usage.message : undefined}
+        >
+          {message}
+        </p>
+      ) : windows.length > 0 ? (
+        <div className="mt-1 grid grid-cols-[max-content_minmax(0,1fr)_2.25rem_max-content] gap-x-2 gap-y-0.5 pl-5">
+          {windows.map((window) => (
+            <WindowRow key={window.label} window={window} now={now} />
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function CompactProviderRow({ row, now }: { row: UsageRow; now: number }) {
+  const { provider, usage, windows, message } = row;
+  return (
+    <section
+      aria-label={`${provider.displayName} usage`}
+      className="flex min-w-0 items-center gap-2"
+      title={provider.displayName + (usage.status === "ok" && usage.planLabel ? ` · ${usage.planLabel}` : "")}
+    >
+      <ProviderIcon
+        providerKind="agent"
+        provider={provider}
+        fallback="Bot"
+        className="size-3.5 shrink-0"
+        aria-label={provider.displayName}
+      />
+      {message !== null ? (
+        <span className="min-w-0 truncate text-2xs text-muted-foreground">{message}</span>
+      ) : (
+        <div
+          className="grid min-w-0 flex-1 gap-2"
+          style={{ gridTemplateColumns: `repeat(${Math.max(1, windows.length)}, minmax(0, 1fr))` }}
+        >
+          {windows.map((window) => {
+            const tone = usageTone(window.usedPercent);
+            const countdown = formatCountdown(window.resetsAt, now);
+            return (
+              <span
+                key={window.label}
+                className="flex min-w-0 items-center gap-1 text-2xs leading-4"
+                title={describeWindow(window) + (countdown === null ? "" : ` (in ${countdown})`)}
+              >
+                <span className="shrink-0 text-subtle-foreground">{shortWindowLabel(window)}</span>
+                <Bar window={window} className="h-1 flex-1" />
+                <span className={cn("shrink-0 tabular-nums", TEXT_CLASS[tone])}>
+                  {Math.round(remainingOf(window))}
+                </span>
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function IconButton({
+  label,
+  icon,
+  spinning = false,
+  disabled = false,
+  onClick,
+}: {
+  label: string;
+  icon: string;
+  spinning?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      className="flex size-5 shrink-0 items-center justify-center rounded-sm text-subtle-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50"
+      onClick={onClick}
+    >
+      <Icon name={icon} aria-hidden className={cn("size-3", spinning && "animate-spin")} />
+    </button>
+  );
 }
 
 function UsageBar() {
   const sdk = useSdk();
   const snapshot = useSyncExternalStore(subscribeUsage, getUsageSnapshot, getUsageSnapshot);
-  const { providers } = experimental_useProviders();
+  const [prefs] = usePrefs();
   const { threads } = experimental_useSidebarThreads();
+  const allRows = useUsageRows(snapshot.data);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -159,96 +275,83 @@ function UsageBar() {
     return () => window.clearTimeout(timer);
   }, [busyCount, sdk]);
 
-  const rows = useMemo(() => {
-    const data = snapshot.data ?? {};
-    const order = new Map(providers.map((provider, index) => [provider.id, index]));
-    return Object.entries(data)
-      .filter(([, usage]) => usage.status !== "not_installed")
-      .sort(
-        ([a], [b]) =>
-          (order.get(a) ?? Number.MAX_SAFE_INTEGER) - (order.get(b) ?? Number.MAX_SAFE_INTEGER),
-      )
-      .map(([id, usage]) => ({
-        id,
-        usage,
-        provider: providers.find((provider) => provider.id === id) ?? { id, displayName: id },
-      }));
-  }, [snapshot.data, providers]);
+  const rows = allRows
+    .filter(
+      (row) =>
+        !prefs.hiddenProviders.includes(row.id) &&
+        !(prefs.hideSignedOut && row.usage.status === "unauthenticated"),
+    )
+    .map((row) => ({
+      ...row,
+      windows: row.windows.filter(
+        (window) => !prefs.hiddenWindows.includes(windowKey(row.id, window.label)),
+      ),
+    }))
+    // A provider whose every window is hidden has nothing left to say.
+    .filter((row) => row.message !== null || row.windows.length > 0);
 
   const loadedAgo =
     snapshot.loadedAt === null ? null : Math.max(0, Math.round((now - snapshot.loadedAt) / 60_000));
+  const status =
+    snapshot.error !== null && snapshot.data !== null
+      ? snapshot.error
+      : loadedAgo === null
+        ? ""
+        : loadedAgo === 0
+          ? "Updated just now"
+          : `Updated ${loadedAgo} min ago`;
+  const controls = (
+    <>
+      <IconButton
+        label="Refresh usage"
+        icon="RotateCcw"
+        spinning={snapshot.refreshing}
+        disabled={snapshot.refreshing}
+        onClick={() => void refreshUsage(sdk, 0)}
+      />
+      <IconButton
+        label="Usage bar settings"
+        icon="SlidersHorizontal"
+        onClick={() => openSettings(settingsPluginId)}
+      />
+    </>
+  );
+
+  const empty =
+    rows.length === 0 ? (
+      <p className="text-2xs text-muted-foreground">
+        {snapshot.data === null
+          ? (snapshot.error ?? "Loading usage…")
+          : allRows.length === 0
+            ? "No provider reports usage on this machine."
+            : "Every provider is hidden."}
+      </p>
+    ) : null;
+
+  if (prefs.compact) {
+    return (
+      <div className="group relative flex flex-col gap-1 px-2.5 py-1.5" title={status || undefined}>
+        {empty}
+        {rows.map((row) => (
+          <CompactProviderRow key={row.id} row={row} now={now} />
+        ))}
+        {/* Controls float over the card on hover so compact mode costs no extra row. */}
+        <div className="absolute right-1 top-1 flex items-center gap-0.5 rounded-sm bg-sidebar opacity-0 shadow-sm transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          {controls}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-2 px-2.5 py-2">
-      {rows.length === 0 ? (
-        <p className="text-2xs text-muted-foreground">
-          {snapshot.data === null
-            ? snapshot.error ?? "Loading usage…"
-            : "No provider reports usage on this machine."}
-        </p>
-      ) : (
-        rows.map(({ id, usage, provider }) => {
-          const message = statusMessage(usage);
-          return (
-            <section key={id} aria-label={`${provider.displayName} usage`} className="min-w-0">
-              <div className="flex min-w-0 items-center gap-1.5">
-                <ProviderIcon
-                  providerKind="agent"
-                  provider={provider}
-                  fallback="Bot"
-                  className="size-3.5 shrink-0"
-                  aria-hidden
-                />
-                <span className="min-w-0 flex-1 truncate text-xs font-medium text-sidebar-foreground">
-                  {provider.displayName}
-                </span>
-                {usage.status === "ok" && usage.planLabel !== null ? (
-                  <span className="shrink-0 rounded-sm bg-sidebar-border/60 px-1 py-0.5 text-2xs leading-none text-subtle-foreground">
-                    {usage.planLabel}
-                  </span>
-                ) : null}
-              </div>
-              {message !== null ? (
-                <p
-                  className="mt-0.5 pl-5 text-2xs text-muted-foreground"
-                  title={usage.status === "error" ? usage.message : undefined}
-                >
-                  {message}
-                </p>
-              ) : usage.status === "ok" ? (
-                <div className="mt-1 grid grid-cols-[max-content_minmax(0,1fr)_2.25rem_max-content] gap-x-2 gap-y-0.5 pl-5">
-                  {usage.windows.map((window) => (
-                    <WindowRow key={`${window.label}-${window.resetsAt}`} window={window} now={now} />
-                  ))}
-                </div>
-              ) : null}
-            </section>
-          );
-        })
-      )}
-      <div className="flex items-center justify-between gap-2 text-2xs text-subtle-foreground">
-        <span className="truncate">
-          {snapshot.error !== null && snapshot.data !== null
-            ? snapshot.error
-            : loadedAgo === null
-              ? ""
-              : loadedAgo === 0
-                ? "Updated just now"
-                : `Updated ${loadedAgo} min ago`}
-        </span>
-        <button
-          type="button"
-          aria-label="Refresh usage"
-          disabled={snapshot.refreshing}
-          className="flex size-5 shrink-0 items-center justify-center rounded-sm hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50"
-          onClick={() => void refreshUsage(sdk, 0)}
-        >
-          <Icon
-            name="RotateCcw"
-            aria-hidden
-            className={cn("size-3", snapshot.refreshing && "animate-spin")}
-          />
-        </button>
+      {empty}
+      {rows.map((row) => (
+        <ProviderBlock key={row.id} row={row} now={now} />
+      ))}
+      <div className="flex items-center gap-1 text-2xs text-subtle-foreground">
+        <span className="min-w-0 flex-1 truncate">{status}</span>
+        {controls}
       </div>
     </div>
   );
@@ -263,9 +366,17 @@ export default definePluginApp((app) => {
     component: UsageBar,
   });
 
+  app.slots.settingsSection({
+    id: "display",
+    title: "Display",
+    description: "What the usage card in the sidebar footer shows.",
+    component: UsageSettings,
+  });
+
   app.contentScripts.register({
     id: "keep-usage-open",
     mount({ pluginId, signal }) {
+      settingsPluginId = pluginId;
       const triggerSelector = `[id^="plugin-sidebar-footer-trigger-${pluginId}-${DISCLOSURE_ID}-"]`;
       let lastOpenAt = 0;
       ensureOpen = () => {

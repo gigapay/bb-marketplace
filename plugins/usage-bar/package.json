@@ -1,7 +1,8 @@
 {
   "name": "bb-plugin-usage-bar",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
+  "description": "Always-visible provider usage bars in the BB sidebar footer.",
   "engines": {
     "bb": ">=0.44",
     "bbPluginSdk": ">=0.5.29"
@@ -14,6 +15,9 @@
     },
     "app": "./app.tsx",
     "server": "./server.ts"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "clsx": "^2.1.1",
@@ -41,6 +45,5 @@
     "class-variance-authority": "^0.7.1",
     "sonner": "^1.7.4",
     "vaul": "^1.1.2"
-  },
-  "description": "Always-visible provider usage bars in the BB sidebar footer."
+  }
 }
