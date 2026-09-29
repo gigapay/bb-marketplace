@@ -1,0 +1,25 @@
+import { homedir } from "node:os";
+import {
+  experimental_defineHostEntry,
+  experimental_nativeRootsHostContract,
+} from "@get-bb/plugin-sdk/host";
+import { resolvePiProviderStateDir } from "./loaded-skills.js";
+import { resolvePiNativeRoots } from "./native-roots.js";
+
+export { experimental_providerBridge } from "./bridge/bridge.js";
+
+export default experimental_defineHostEntry({
+  contract: experimental_nativeRootsHostContract,
+  handlers: {
+    resolveNativeRoots: ({ cwd }) =>
+      resolvePiNativeRoots({
+        homeDir: homedir(),
+        env: process.env,
+        cwd,
+        stateDir: resolvePiProviderStateDir({
+          env: process.env,
+          homeDir: homedir(),
+        }),
+      }),
+  },
+});
