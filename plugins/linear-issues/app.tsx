@@ -9,10 +9,12 @@ import { IssueDetail } from "./views/IssueDetail";
 import { IssueList } from "./views/IssueList";
 import { ThreadHeaderLink } from "./views/ThreadHeaderLink";
 import { ComposerIssuePicker, requestIssuePicker } from "./views/ComposerIssuePicker";
+import { SidebarDecorator } from "./views/SidebarDecorator";
 import type { rpcContract } from "./server";
 import { IDENTIFIER_PATTERN } from "./shared/links";
 
 const PANEL_PATH = "issues";
+const LINEAR_ICON = "linear-issues/linear";
 
 
 function LinearPage({ subPath }: PluginNavPanelProps) {
@@ -56,7 +58,7 @@ export default definePluginApp((app) => {
   app.slots.navPanel({
     id: "issues",
     title: "Linear",
-    icon: "SquareKanban",
+    icon: LINEAR_ICON,
     path: PANEL_PATH,
     component: LinearPage,
   });
@@ -64,6 +66,10 @@ export default definePluginApp((app) => {
     id: "linked-issue",
     title: "Linear issue",
     component: ThreadHeaderLink,
+  });
+  app.slots.experimental_appOverlay({
+    id: "sidebar-badges",
+    component: SidebarDecorator,
   });
   app.composer.customize({
     id: "linear-issue",

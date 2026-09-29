@@ -119,7 +119,7 @@ export function ComposerIssuePicker() {
         disabled={loading}
         onClick={() => setOpen(true)}
       >
-        <Icon name={loading ? "LoaderCircle" : "SquareKanban"} className={loading ? "size-4 animate-spin" : "size-4"} />
+        <Icon name={loading ? "LoaderCircle" : "linear-issues/linear"} className={loading ? "size-4 animate-spin" : "size-4"} />
         <span className="font-mono text-xs">{current ?? "Linear"}</span>
       </Button>
       <IssuePickerDialog open={open} onOpenChange={setOpen} onPick={(issue) => void pick(issue.identifier)} />

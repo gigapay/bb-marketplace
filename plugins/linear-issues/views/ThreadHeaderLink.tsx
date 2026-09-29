@@ -15,7 +15,7 @@ import { issueIdentifierFromBranch } from "../shared/links";
 import type { IssueSummary, rpcContract } from "../server";
 import { SOURCE_LABELS, useIssueLinks } from "./links";
 import { IssuePickerDialog } from "./pickers";
-import { StateIcon, errorText } from "./shared";
+import { errorText } from "./shared";
 
 export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHeaderActionProps) {
   const rpc = useRpc<typeof rpcContract>();
@@ -62,7 +62,7 @@ export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHe
           aria-label="Link a Linear issue"
           onClick={() => setPickerOpen(true)}
         >
-          <Icon name="SquareKanban" className="size-4" />
+          <Icon name="linear-issues/linear" className="size-4" />
           {isCompactViewport ? null : <span>Link issue</span>}
         </Button>
         <IssuePickerDialog
@@ -86,7 +86,7 @@ export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHe
         aria-label={`Linear issue ${link.identifier}`}
         onClick={() => setMenuOpen(true)}
       >
-        {issue ? <StateIcon state={issue.state} /> : <Icon name="SquareKanban" className="size-4" />}
+        <Icon name="linear-issues/linear" className="size-3.5 text-[#5E6AD2]" />
         <span className="font-mono text-xs">{link.identifier}</span>
       </Button>
 
@@ -112,7 +112,7 @@ export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHe
                 navigate.toPluginPanel("issues", { subPath: link.identifier });
               }}
             >
-              <Icon name="SquareKanban" className="size-4" />
+              <Icon name="linear-issues/linear" className="size-4" />
               Open issue
             </Button>
             <Button
