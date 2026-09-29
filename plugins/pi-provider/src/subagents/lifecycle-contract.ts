@@ -19,6 +19,9 @@ export const LIFECYCLE_LIMITS = {
   toolCallIdLength: 1024,
   labelLength: 200,
   harnessLength: 32,
+  agentLength: 100,
+  modelLength: 200,
+  thinkingLength: 32,
   snapshotRuns: 256,
 } as const;
 
@@ -50,6 +53,14 @@ export const subagentLifecycleRunSchema = z
     status: subagentLifecycleStatusSchema,
     createdAt: timestamp,
     settledAt: timestamp.optional(),
+    /** Agent-file profile name; absent for ad-hoc runs. */
+    agent: z.string().min(1).max(LIFECYCLE_LIMITS.agentLength).optional(),
+    model: z.string().min(1).max(LIFECYCLE_LIMITS.modelLength).optional(),
+    thinking: z
+      .string()
+      .max(LIFECYCLE_LIMITS.thinkingLength)
+      .regex(/^[a-z0-9_-]+$/)
+      .optional(),
   })
   .strict();
 

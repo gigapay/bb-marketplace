@@ -232,3 +232,32 @@ it("keeps two concurrent subagents as two native tasks", async () => {
   ]);
   expect(new Set(opened.map((delta) => delta.key?.providerItemId)).size).toBe(2);
 });
+
+it("names agent-file runs with their profile, model, and thinking through the real extension projection", async () => {
+  const h = await start("bb-pi-subagents-profile-");
+  const threadId = "thr_sub_profile";
+  await h.startThread(threadId);
+  spawn(h, threadId, {
+    name: "Recapture dialogs",
+    agent: "designer",
+    model: "openai-codex/gpt-5.6-luna",
+    resolvedModel: "openai-codex/gpt-5.6-sol",
+    thinking: "high",
+    durationMs: 100,
+  });
+  await waitForTaskStatus(h, threadId, "completed");
+  const descriptions = taskDeltas(h, threadId).map(
+    (delta) => (delta.item ?? delta.snapshot) as { description?: string },
+  ).map((shape) => shape.description);
+  expect(descriptions.at(-1)).toBe("Recapture dialogs (designer) · openai-codex/gpt-5.6-sol · high");
+
+  const since = h.deltasOf(threadId).length;
+  spawn(h, threadId, { name: "Ad hoc check", durationMs: 50 });
+  await h.waitForTurnBoundary(threadId, since);
+  await h.waitFor(
+    () => taskStatuses(h, threadId).filter((entry) => entry === "item.close:completed").length === 2,
+    "the ad-hoc run",
+  );
+  const adHoc = taskDeltas(h, threadId).filter((delta) => delta.kind === "item.close").at(-1);
+  expect((adHoc?.item as { description?: string }).description).toBe("Ad hoc check");
+});

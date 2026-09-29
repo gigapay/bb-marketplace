@@ -86,6 +86,10 @@ export default function fakeSubagents(pi) {
         harness: params.harness ?? "pi",
         status: "queued",
         createdAt: Date.now(),
+        // Display fields per the contract: the profile only for agent-file runs.
+        ...(params.agent ? { agent: params.agent } : {}),
+        ...(params.model ? { model: params.model } : {}),
+        ...(params.thinking ? { thinking: params.thinking } : {}),
         // Never forwarded: the bb extension copies an allowlist only.
         prompt: params.prompt,
       };
@@ -94,7 +98,11 @@ export default function fakeSubagents(pi) {
       if (params.failImmediately) {
         settle(run, "failed");
       } else {
-        update(run, { status: "running" });
+        update(run, {
+          status: "running",
+          // Routing may resolve the effective model once the run starts.
+          ...(params.resolvedModel ? { model: params.resolvedModel } : {}),
+        });
         if (params.outcome !== "hold") {
           timers.set(
             run.id,
