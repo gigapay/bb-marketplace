@@ -27,6 +27,8 @@ export const feedItemSchema = z.object({
   reviewState: z.string().nullable(),
   path: z.string().nullable(),
   line: z.number().nullable(),
+  // Which side of the diff the line is on; null outside review threads.
+  side: z.enum(["LEFT", "RIGHT"]).nullable(),
   diffHunk: z.string().nullable(),
   isResolved: z.boolean(),
   isOutdated: z.boolean(),
@@ -86,7 +88,7 @@ export const PR_DETAIL_QUERY = `query PullRequest($owner: String!, $name: String
       comments(last: 100) { nodes { id body createdAt url ${ACTOR} } }
       reviews(last: 100) { nodes { id body state createdAt url ${ACTOR} } }
       reviewThreads(last: 100) { nodes {
-        id isResolved isOutdated path line originalLine
+        id isResolved isOutdated path line originalLine diffSide
         comments(first: 50) { nodes { id body createdAt url diffHunk ${ACTOR} } }
       } }
     }
@@ -134,6 +136,7 @@ export type RawPrDetail = {
     path: string;
     line: number | null;
     originalLine: number | null;
+    diffSide: "LEFT" | "RIGHT";
     comments: Nodes<RawComment & { diffHunk: string }>;
   }>;
 };
@@ -168,7 +171,7 @@ export function normalizeDetail(raw: RawPrDetail, key: string): PrDetail {
   }
 
   const feed: FeedItem[] = [];
-  const base = { reviewState: null, path: null, line: null, diffHunk: null, isResolved: false, isOutdated: false, replies: [] };
+  const base = { reviewState: null, path: null, line: null, side: null, diffHunk: null, isResolved: false, isOutdated: false, replies: [] };
   for (const comment of raw.comments.nodes) {
     feed.push({ ...base, id: comment.id, kind: "comment", author: toActor(comment.author), body: comment.body, createdAt: comment.createdAt, url: comment.url });
   }
@@ -190,6 +193,7 @@ export function normalizeDetail(raw: RawPrDetail, key: string): PrDetail {
       url: first.url,
       path: thread.path,
       line: thread.line ?? thread.originalLine,
+      side: thread.diffSide,
       diffHunk: first.diffHunk,
       isResolved: thread.isResolved,
       isOutdated: thread.isOutdated,
