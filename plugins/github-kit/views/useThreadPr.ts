@@ -1,6 +1,6 @@
 // Finds the pull request for a thread's branch, and caches PR details so the
 // thread tab and every diff file card share one GitHub request.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   experimental_useSidebarThreadPullRequest as useThreadPullRequest,
   experimental_useSidebarThreads as useSidebarThreads,
@@ -66,32 +66,85 @@ export function useThreadPrKey(threadId: string | null): ThreadPrState {
   return ref === null ? { status: "none", branch } : { status: "found", key: prKey(ref) };
 }
 
-const detailCache = new Map<string, { promise: Promise<PrDetail>; at: number }>();
+// One entry per PR, shared by the tab and every diff file card. A refresh
+// after resolving or replying reaches all of them at once.
+type Entry = { promise: Promise<PrDetail>; at: number; value: PrDetail | null; error: string | null };
+const detailCache = new Map<string, Entry>();
+const listeners = new Map<string, Set<() => void>>();
 const DETAIL_TTL_MS = 60_000;
+
+function notify(key: string) {
+  for (const listener of listeners.get(key) ?? []) listener();
+}
 
 export function fetchPrDetail(rpc: Rpc, key: string, force = false): Promise<PrDetail> {
   const cached = detailCache.get(key);
   if (!force && cached !== undefined && Date.now() - cached.at < DETAIL_TTL_MS) return cached.promise;
   const promise = rpc.call("pr_get", { key });
-  detailCache.set(key, { promise, at: Date.now() });
-  promise.catch(() => detailCache.delete(key));
+  const entry: Entry = { promise, at: Date.now(), value: cached?.value ?? null, error: null };
+  detailCache.set(key, entry);
+  promise.then(
+    (value) => {
+      entry.value = value;
+      notify(key);
+    },
+    (cause) => {
+      detailCache.delete(key);
+      entry.error = cause instanceof Error ? cause.message : String(cause);
+      notify(key);
+    },
+  );
   return promise;
 }
 
-/** The cached PR detail, or null while loading, when missing, or on error. */
-export function usePrDetail(key: string | null): PrDetail | null {
+export type PrDetailState = {
+  detail: PrDetail | null;
+  error: string | null;
+  loading: boolean;
+  refresh: () => Promise<void>;
+};
+
+/** The shared PR detail; `refresh` refetches for every subscriber. */
+export function usePrDetail(key: string | null): PrDetailState {
   const rpc = useRpc<typeof rpcContract>();
-  const [detail, setDetail] = useState<PrDetail | null>(null);
+  const [, bump] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
-    if (key === null) return setDetail(null);
-    let cancelled = false;
+    if (key === null) return;
+    const listener = () => bump((value) => value + 1);
+    const set = listeners.get(key) ?? new Set();
+    set.add(listener);
+    listeners.set(key, set);
+    setLoading(true);
     fetchPrDetail(rpc, key).then(
-      (next) => !cancelled && setDetail(next),
-      () => !cancelled && setDetail(null),
+      () => {
+        setError(null);
+        setLoading(false);
+      },
+      (cause) => {
+        setError(cause instanceof Error ? cause.message : String(cause));
+        setLoading(false);
+      },
     );
     return () => {
-      cancelled = true;
+      set.delete(listener);
     };
   }, [rpc, key]);
-  return detail;
+
+  const refresh = useCallback(async () => {
+    if (key === null) return;
+    setLoading(true);
+    try {
+      await fetchPrDetail(rpc, key, true);
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLoading(false);
+    }
+  }, [rpc, key]);
+
+  return { detail: key === null ? null : (detailCache.get(key)?.value ?? null), error, loading, refresh };
 }
