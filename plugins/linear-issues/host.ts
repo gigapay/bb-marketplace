@@ -28,6 +28,14 @@ export default experimental_defineHostEntry({
       // Only touch the branch BB just created; anything else means someone
       // (or the agent) already switched, and we leave it alone.
       if (current !== from) return { status: "skipped" as const, reason: `HEAD is on ${current}, not ${from}` };
+      // A pushed branch may back a PR; renaming it locally would split it
+      // from its remote, so only never-pushed branches are renamed.
+      try {
+        const upstream = await git(path, ["rev-parse", "--abbrev-ref", `${from}@{upstream}`], signal);
+        if (upstream !== "") return { status: "skipped" as const, reason: `${from} already tracks ${upstream}` };
+      } catch {
+        // No upstream configured: safe to rename.
+      }
       try {
         await git(path, ["check-ref-format", "--branch", to], signal);
       } catch {
