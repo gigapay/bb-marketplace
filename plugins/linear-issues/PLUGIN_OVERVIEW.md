@@ -6,6 +6,8 @@ The Linear page lists the issues assigned to you, created by you, or that you're
 
 Open an issue to read its description, sub-issues and comments, and to see the threads linked to it. From there you can start a new thread. The composer is prefilled with the ticket and preselects the last project you used for that Linear team.
 
+The home screen gets a "Linear issues" section with your most urgent open issues. Start one right into the composer above it, or jump to its latest thread.
+
 You can also start from a ticket in BB's regular new-thread composer. Use the Linear button next to the send button, or "Start from a Linear issue" in the `+` menu. Picking a ticket fills the prompt and switches to a Linear worktree.
 
 ## Linear worktrees

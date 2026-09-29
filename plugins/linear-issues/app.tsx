@@ -7,6 +7,7 @@ import type { PluginNavPanelProps } from "@get-bb/plugin-sdk/app";
 import { EmptyState, ErrorLine, errorText } from "./views/shared";
 import { IssueDetail } from "./views/IssueDetail";
 import { IssueList } from "./views/IssueList";
+import { HomeSection } from "./views/HomeSection";
 import { ThreadHeaderLink } from "./views/ThreadHeaderLink";
 import { THREAD_PANEL_ACTION_ID, ThreadLinearPanel } from "./views/ThreadLinearPanel";
 import { ComposerIssuePicker, requestIssuePicker } from "./views/ComposerIssuePicker";
@@ -63,6 +64,11 @@ export default definePluginApp((app) => {
     icon: LINEAR_ICON,
     path: PANEL_PATH,
     component: LinearPage,
+  });
+  app.slots.homepageSection({
+    id: "my-issues",
+    title: "Linear issues",
+    component: HomeSection,
   });
   app.slots.threadPanelAction({
     id: THREAD_PANEL_ACTION_ID,

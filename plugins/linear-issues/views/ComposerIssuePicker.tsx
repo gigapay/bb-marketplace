@@ -71,6 +71,27 @@ async function ensureWorktree(composer: PluginComposerApi): Promise<void> {
   }
 }
 
+/**
+ * Puts a ticket into a new-thread composer: switches to a Linear worktree
+ * (unless the project is "no project"), then seeds the prompt, keeping what
+ * the user already typed. Shared by the composer button and the home section.
+ */
+export async function startFromIssue(
+  composer: PluginComposerApi,
+  rpc: RpcClient,
+  identifier: string,
+  isPersonalProject: boolean,
+): Promise<void> {
+  const issue: IssueDetail = await rpc.call("issue_get", { id: identifier });
+  // Worktree first: switching environments can remount plugin surfaces, and
+  // the draft survives that while local state would not.
+  if (!isPersonalProject) await ensureWorktree(composer);
+  composer.setText(buildIssuePrompt(issue, userNotes(composer.text)));
+  composer.focus();
+}
+
+type RpcClient = ReturnType<typeof useRpc<typeof rpcContract>>;
+
 export function ComposerIssuePicker() {
   const rpc = useRpc<typeof rpcContract>();
   const composer = useComposer();
@@ -96,12 +117,7 @@ export function ComposerIssuePicker() {
     setOpen(false);
     setLoading(true);
     try {
-      const issue: IssueDetail = await rpc.call("issue_get", { id: identifier });
-      // Worktree first: switching environments can remount this surface, and
-      // the draft survives that while local state would not.
-      if (!isPersonal) await ensureWorktree(composer);
-      composer.setText(buildIssuePrompt(issue, userNotes(composer.text)));
-      composer.focus();
+      await startFromIssue(composer, rpc, identifier, isPersonal);
     } catch (cause) {
       toast.error(errorText(cause));
     } finally {
