@@ -32,6 +32,10 @@ export const feedItemSchema = z.object({
   diffHunk: z.string().nullable(),
   isResolved: z.boolean(),
   isOutdated: z.boolean(),
+  resolvedBy: z.string().nullable(),
+  // Only review threads can be resolved; every item can get a reply.
+  canResolve: z.boolean(),
+  canUnresolve: z.boolean(),
   replies: z.array(replySchema),
 });
 export type FeedItem = z.infer<typeof feedItemSchema>;
@@ -88,7 +92,7 @@ export const PR_DETAIL_QUERY = `query PullRequest($owner: String!, $name: String
       comments(last: 100) { nodes { id body createdAt url ${ACTOR} } }
       reviews(last: 100) { nodes { id body state createdAt url ${ACTOR} } }
       reviewThreads(last: 100) { nodes {
-        id isResolved isOutdated path line originalLine diffSide
+        id isResolved isOutdated path line originalLine diffSide resolvedBy { login } viewerCanResolve viewerCanUnresolve
         comments(first: 50) { nodes { id body createdAt url diffHunk ${ACTOR} } }
       } }
     }
@@ -137,6 +141,9 @@ export type RawPrDetail = {
     line: number | null;
     originalLine: number | null;
     diffSide: "LEFT" | "RIGHT";
+    resolvedBy: { login: string } | null;
+    viewerCanResolve: boolean;
+    viewerCanUnresolve: boolean;
     comments: Nodes<RawComment & { diffHunk: string }>;
   }>;
 };
@@ -171,7 +178,7 @@ export function normalizeDetail(raw: RawPrDetail, key: string): PrDetail {
   }
 
   const feed: FeedItem[] = [];
-  const base = { reviewState: null, path: null, line: null, side: null, diffHunk: null, isResolved: false, isOutdated: false, replies: [] };
+  const base = { reviewState: null, path: null, line: null, side: null, diffHunk: null, isResolved: false, isOutdated: false, resolvedBy: null, canResolve: false, canUnresolve: false, replies: [] };
   for (const comment of raw.comments.nodes) {
     feed.push({ ...base, id: comment.id, kind: "comment", author: toActor(comment.author), body: comment.body, createdAt: comment.createdAt, url: comment.url });
   }
@@ -197,6 +204,9 @@ export function normalizeDetail(raw: RawPrDetail, key: string): PrDetail {
       diffHunk: first.diffHunk,
       isResolved: thread.isResolved,
       isOutdated: thread.isOutdated,
+      resolvedBy: thread.resolvedBy?.login ?? null,
+      canResolve: thread.viewerCanResolve,
+      canUnresolve: thread.viewerCanUnresolve,
       replies: replies.map((reply) => ({ id: reply.id, author: toActor(reply.author), body: reply.body, createdAt: reply.createdAt, url: reply.url })),
     });
   }

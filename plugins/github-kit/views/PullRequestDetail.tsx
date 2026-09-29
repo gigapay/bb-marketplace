@@ -1,7 +1,7 @@
 // One pull request: header, reviewers, description and the comment feed with
 // a queue to send to a BB thread. Shared by the GitHub page and the thread
 // side-panel tab.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import {
@@ -12,14 +12,14 @@ import {
   useRpc,
 } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { FeedItem, PrDetail, Reviewer } from "../detail";
 import type { rpcContract } from "../server";
 import type { Audience } from "../shared/audience";
-import { fetchPrDetail } from "./useThreadPr";
+import { Composer, Discussion } from "./Discussion";
+import { usePrDetail } from "./useThreadPr";
 import { ChecksIcon, EmptyState, ErrorLine, LabelChip, PrStateIcon, ReviewChip, errorText, relativeTime, useDebounced } from "./shared";
 
 type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
@@ -35,35 +35,9 @@ export function PullRequestDetail({
   onBack?: () => void;
 }) {
   const rpc = useRpc<typeof rpcContract>();
-  const [pr, setPr] = useState<PrDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  // The first load can use the cache the diff view shares; refreshes can't.
-  const loadedOnce = useRef(false);
-  const load = useCallback(() => {
-    let cancelled = false;
-    setLoading(true);
-    const force = loadedOnce.current;
-    loadedOnce.current = true;
-    fetchPrDetail(rpc, prKey, force).then(
-      (next) => {
-        if (cancelled) return;
-        setPr(next);
-        setError(null);
-        setLoading(false);
-      },
-      (cause) => {
-        if (cancelled) return;
-        setError(errorText(cause));
-        setLoading(false);
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [rpc, prKey]);
-  useEffect(() => load(), [load]);
+  // Shared with the diff view, so resolving here updates it too.
+  const { detail: pr, error, loading, refresh } = usePrDetail(prKey);
+  const load = () => void refresh();
 
   return (
     <div className="space-y-5">
@@ -88,7 +62,7 @@ export function PullRequestDetail({
               <Markdown content={pr.body} className="text-sm" />
             )}
           </Section>
-          <Comments pr={pr} rpc={rpc} threadId={threadId} />
+          <Comments pr={pr} rpc={rpc} threadId={threadId} onChanged={refresh} />
         </>
       )}
     </div>
@@ -345,7 +319,17 @@ function matchesAudience(item: FeedItem, audience: Audience): boolean {
   return audience === "bots" ? isBot : !isBot;
 }
 
-function Comments({ pr, rpc, threadId }: { pr: PrDetail; rpc: Rpc; threadId: string | null }) {
+function Comments({
+  pr,
+  rpc,
+  threadId,
+  onChanged,
+}: {
+  pr: PrDetail;
+  rpc: Rpc;
+  threadId: string | null;
+  onChanged: () => Promise<void>;
+}) {
   const [audience, setAudience] = useState<Audience>("all");
   const [showResolved, setShowResolved] = useState(false);
   const [queued, setQueued] = useState<ReadonlySet<string>>(new Set());
@@ -355,10 +339,10 @@ function Comments({ pr, rpc, threadId }: { pr: PrDetail; rpc: Rpc; threadId: str
   const [pickedThread, setPickedThread] = useState<string | null>(null);
   const target = threadId ?? pickedThread ?? linkedThreads[0]?.id ?? null;
 
-  // Drop queued ids that vanished after a refresh.
+  // Drop queued ids that vanished or got resolved after a refresh.
   useEffect(() => {
-    const ids = new Set(pr.feed.map((item) => item.id));
-    setQueued((current) => new Set([...current].filter((id) => ids.has(id))));
+    const open = new Set(pr.feed.filter((item) => !item.isResolved).map((item) => item.id));
+    setQueued((current) => new Set([...current].filter((id) => open.has(id))));
   }, [pr.feed]);
 
   const counts = useMemo(() => {
@@ -367,10 +351,11 @@ function Comments({ pr, rpc, threadId }: { pr: PrDetail; rpc: Rpc; threadId: str
       all: unresolved.length,
       humans: unresolved.filter((item) => !(item.author?.isBot ?? false)).length,
       bots: unresolved.filter((item) => item.author?.isBot ?? false).length,
-      resolved: pr.feed.length - unresolved.length,
     };
   }, [pr.feed]);
-  const visible = pr.feed.filter((item) => matchesAudience(item, audience) && (showResolved || !item.isResolved));
+  const shown = pr.feed.filter((item) => matchesAudience(item, audience));
+  const open = shown.filter((item) => !item.isResolved);
+  const resolved = shown.filter((item) => item.isResolved);
 
   const toggle = (id: string) =>
     setQueued((current) => {
@@ -379,8 +364,7 @@ function Comments({ pr, rpc, threadId }: { pr: PrDetail; rpc: Rpc; threadId: str
       else next.add(id);
       return next;
     });
-  const queueVisible = () =>
-    setQueued((current) => new Set([...current, ...visible.filter((item) => !item.isResolved).map((item) => item.id)]));
+  const queueVisible = () => setQueued((current) => new Set([...current, ...open.map((item) => item.id)]));
 
   const send = () => {
     if (target === null || queued.size === 0) return;
@@ -403,50 +387,69 @@ function Comments({ pr, rpc, threadId }: { pr: PrDetail; rpc: Rpc; threadId: str
     <Section
       title="Comments"
       actions={
-        visible.some((item) => !item.isResolved) ? (
+        open.length > 0 ? (
           <Button size="sm" variant="ghost" onClick={queueVisible}>
             Queue all shown
           </Button>
         ) : null
       }
     >
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div role="tablist" aria-label="Comment authors" className="flex rounded-md border border-border p-0.5">
-          {AUDIENCES.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={audience === item.id}
-              onClick={() => setAudience(item.id)}
-              className={cn(
-                "rounded px-2.5 py-1 text-sm transition-colors",
-                audience === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {item.label} <span className="text-muted-foreground">{counts[item.id]}</span>
-            </button>
-          ))}
-        </div>
-        {counts.resolved > 0 ? (
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Checkbox checked={showResolved} onCheckedChange={(checked) => setShowResolved(checked === true)} />
-            Show resolved ({counts.resolved})
-          </label>
-        ) : null}
+      <div role="tablist" aria-label="Comment authors" className="mb-3 flex w-fit rounded-md border border-border p-0.5">
+        {AUDIENCES.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={audience === item.id}
+            onClick={() => setAudience(item.id)}
+            className={cn(
+              "rounded px-2.5 py-1 text-sm transition-colors",
+              audience === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {item.label} <span className="text-muted-foreground">{counts[item.id]}</span>
+          </button>
+        ))}
       </div>
 
-      {visible.length === 0 ? (
-        <EmptyState>
-          {audience === "bots" ? "No bot comments." : audience === "humans" ? "No human comments." : "No comments yet."}
-        </EmptyState>
-      ) : (
-        <ul className="space-y-2">
-          {visible.map((item) => (
-            <CommentCard key={item.id} item={item} queued={queued.has(item.id)} onToggle={() => toggle(item.id)} />
-          ))}
-        </ul>
-      )}
+      <div className="space-y-3">
+        {open.length === 0 && resolved.length === 0 ? (
+          <EmptyState>
+            {audience === "bots" ? "No bot comments." : audience === "humans" ? "No human comments." : "No comments yet."}
+          </EmptyState>
+        ) : null}
+        {open.map((item) => (
+          <Discussion
+            key={item.id}
+            item={item}
+            prKey={pr.key}
+            onChanged={onChanged}
+            showPath
+            queue={{ queued: queued.has(item.id), onToggle: () => toggle(item.id) }}
+          />
+        ))}
+        {resolved.length > 0 ? (
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowResolved((current) => !current)}
+              aria-expanded={showResolved}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <Icon name="ChevronRight" className={cn("size-3.5 transition-transform", showResolved && "rotate-90")} />
+              {resolved.length} resolved {resolved.length === 1 ? "discussion" : "discussions"}
+            </button>
+            {showResolved ? (
+              <div className="mt-2 space-y-3">
+                {resolved.map((item) => (
+                  <Discussion key={item.id} item={item} prKey={pr.key} onChanged={onChanged} showPath />
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {pr.state === "OPEN" ? <Composer prKey={pr.key} itemId={null} placeholder="Leave a comment…" onPosted={onChanged} /> : null}
+      </div>
 
       {queued.size > 0 ? (
         <div className="sticky bottom-0 mt-3 space-y-2 rounded-lg border border-border bg-card p-3 shadow-sm">
@@ -491,60 +494,5 @@ function Comments({ pr, rpc, threadId }: { pr: PrDetail; rpc: Rpc; threadId: str
         </div>
       ) : null}
     </Section>
-  );
-}
-
-function CommentCard({ item, queued, onToggle }: { item: FeedItem; queued: boolean; onToggle: () => void }) {
-  const [expanded, setExpanded] = useState(!item.isResolved);
-  return (
-    <li className={cn("rounded-lg border bg-card", queued ? "border-primary" : "border-border", item.isResolved && "opacity-70")}>
-      <div className="flex items-center gap-2 px-3 py-2 text-xs">
-        {item.isResolved ? (
-          <span aria-hidden className="size-4" />
-        ) : (
-          <Checkbox checked={queued} onCheckedChange={onToggle} aria-label="Queue for the agent" />
-        )}
-        {item.author ? <img src={item.author.avatarUrl} alt="" className="size-5 rounded-full" /> : null}
-        <span className="font-medium">{item.author?.login ?? "ghost"}</span>
-        {item.author?.isBot ? <span className="rounded bg-accent px-1.5 py-0.5 text-[10px] uppercase tracking-wide">bot</span> : null}
-        {item.kind === "thread" ? (
-          <span className="min-w-0 truncate font-mono text-muted-foreground">
-            {item.path}
-            {item.line !== null ? `:${item.line}` : ""}
-          </span>
-        ) : item.kind === "review" && item.reviewState ? (
-          <span className="text-muted-foreground">{item.reviewState.toLowerCase().replace("_", " ")}</span>
-        ) : null}
-        {item.isOutdated ? <span className="text-[#bf8700]">Outdated</span> : null}
-        {item.isResolved ? <span className="text-[#1f883d]">Resolved</span> : null}
-        <span className="flex-1" />
-        <span className="shrink-0 text-muted-foreground">{relativeTime(item.createdAt)}</span>
-        <UrlLink href={item.url} target="_blank" aria-label="Open on GitHub" className="text-muted-foreground hover:text-foreground">
-          <Icon name="ExternalLink" className="size-3.5" />
-        </UrlLink>
-        <button
-          type="button"
-          aria-label={expanded ? "Collapse" : "Expand"}
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <Icon name="ChevronRight" className={cn("size-3.5 transition-transform", expanded && "rotate-90")} />
-        </button>
-      </div>
-      {expanded ? (
-        <div className="space-y-3 border-t border-border px-3 py-2">
-          <Markdown content={item.body} className="text-sm" />
-          {item.replies.map((reply) => (
-            <div key={reply.id} className="border-l-2 border-border pl-3">
-              <div className="mb-1 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">{reply.author?.login ?? "ghost"}</span> · {relativeTime(reply.createdAt)}
-              </div>
-              <Markdown content={reply.body} className="text-sm" />
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </li>
   );
 }

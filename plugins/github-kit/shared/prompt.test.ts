@@ -23,6 +23,10 @@ const item = {
   diffHunk: null,
   isResolved: false,
   isOutdated: true,
+  resolvedBy: null,
+  canResolve: true,
+  canUnresolve: false,
+  side: "RIGHT",
   replies: [],
 } as Parameters<typeof buildCommentsPrompt>[1][number];
 

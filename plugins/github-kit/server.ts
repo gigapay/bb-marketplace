@@ -95,6 +95,19 @@ export const rpcContract = defineRpcContract({
       .strict(),
     output: z.object({ ok: z.literal(true) }),
   },
+  thread_resolve: {
+    input: z.object({ key: prKeySchema, itemId: z.string().min(1).max(200), resolved: z.boolean() }).strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
+  // Replies in the review thread, or, for a conversation comment or review
+  // summary (GitHub doesn't thread those), posts a quoting PR comment.
+  // itemId null posts a new top-level comment.
+  comment_post: {
+    input: z
+      .object({ key: prKeySchema, itemId: z.string().min(1).max(200).nullable(), body: z.string().trim().min(1).max(20_000) })
+      .strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
   // Queues selected comments as one message on a thread. The server
   // re-reads the PR, so the prompt only ever carries GitHub's own text.
   comments_send: {
@@ -322,6 +335,32 @@ export default async function plugin(bb: BbPluginApi) {
       if (remove.length > 0) await githubRest("DELETE", path, { reviewers: remove });
       return { ok: true as const };
     },
+    thread_resolve: async ({ key, itemId, resolved }) => {
+      // Re-read the PR so only one of its own review threads can be touched.
+      const item = (await getPullRequest(key)).feed.find((candidate) => candidate.id === itemId);
+      if (item === undefined || item.kind !== "thread") throw new Error("That review thread isn't on this pull request.");
+      const mutation = resolved ? "resolveReviewThread" : "unresolveReviewThread";
+      await github(`mutation Resolve($id: ID!) { ${mutation}(input: { threadId: $id }) { thread { isResolved } } }`, { id: item.id });
+      return { ok: true as const };
+    },
+    comment_post: async ({ key, itemId, body }) => {
+      const detail = await getPullRequest(key);
+      const item = itemId === null ? null : detail.feed.find((candidate) => candidate.id === itemId);
+      if (item === undefined) throw new Error("That comment isn't on this pull request anymore.");
+      if (item?.kind === "thread") {
+        await github(
+          `mutation Reply($thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { id } } }`,
+          { thread: item.id, body },
+        );
+      } else {
+        const text = item === null ? body : `${quoteFor(item.author?.login ?? "ghost", item.body, item.url)}\n\n${body}`;
+        await github(`mutation Comment($subject: ID!, $body: String!) { addComment(input: { subjectId: $subject, body: $body }) { clientMutationId } }`, {
+          subject: detail.id,
+          body: text,
+        });
+      }
+      return { ok: true as const };
+    },
     comments_send: async ({ threadId, key, itemIds, note }) => {
       const detail = await getPullRequest(key);
       const wanted = new Set(itemIds);
@@ -389,6 +428,14 @@ export default async function plugin(bb: BbPluginApi) {
       }
     },
   });
+}
+
+// GitHub's own "Quote reply" shape, trimmed so long comments don't get pasted whole.
+function quoteFor(login: string, body: string, url: string): string {
+  const lines = body.trim().split("\n");
+  const kept = lines.slice(0, 6).map((line) => `> ${line}`);
+  if (lines.length > 6) kept.push("> …");
+  return [`> [@${login}](${url}):`, ...kept].join("\n");
 }
 
 function prStateLabel(pr: PullRequest): string {
