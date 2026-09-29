@@ -15,6 +15,7 @@ Then install from the Plugins page, or run `bb plugin install linear-issues@yter
 | Plugin | What it does |
 | --- | --- |
 | [linear-issues](plugins/linear-issues) | Browse your Linear issues and start a BB thread from any ticket. |
+| [github-kit](plugins/github-kit) | Your GitHub pull requests in BB, meant to replace the bundled GitHub plugin. |
 | [usage-bar](plugins/usage-bar) | Always-visible provider usage bars in the sidebar footer, Orca style. |
 
 ## Releasing
