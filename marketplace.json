@@ -73,6 +73,29 @@
           "tagPrefix": "github-kit/"
         }
       }
+    },
+    {
+      "id": "pi-provider",
+      "displayName": "Pi",
+      "description": "bb's Pi provider with pi-toolbox subagents in the native agent display, /reload, and every Pi-loaded skill in the / menu.",
+      "icon": "Terminal",
+      "tags": [
+        "pi",
+        "provider",
+        "agents"
+      ],
+      "author": {
+        "name": "Yoann Teruel",
+        "github": "yteruel31"
+      },
+      "source": {
+        "git": {
+          "url": "https://github.com/yteruel31/bb-marketplace.git",
+          "subdir": "plugins/pi-provider",
+          "range": ">=0.1.0 <1.0.0",
+          "tagPrefix": "pi-provider/"
+        }
+      }
     }
   ]
 }
