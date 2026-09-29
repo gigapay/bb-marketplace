@@ -10,6 +10,7 @@ import { z } from "zod";
 import { PR_SCOPES, buildPrSearch, type PrScope } from "./shared/search";
 import { PR_DETAIL_QUERY, actorSchema, normalizeDetail, prDetailSchema, type PrDetail, type RawPrDetail } from "./detail";
 import { parsePrKey, prKey, type PrRef } from "./shared/pr-ref";
+import { PR_CHECKS_QUERY, normalizeChecks, prChecksSchema, type PrChecks, type RawPrChecks } from "./checks";
 import { buildCommentsPrompt } from "./shared/prompt";
 
 const GITHUB_API_URL = "https://api.github.com";
@@ -94,6 +95,11 @@ export const rpcContract = defineRpcContract({
       .object({ key: prKeySchema, add: z.array(loginSchema).max(20), remove: z.array(loginSchema).max(20) })
       .strict(),
     output: z.object({ ok: z.literal(true) }),
+  },
+  // Polled by the UI; fast while checks run, slow once they're done.
+  pr_checks: {
+    input: z.object({ key: prKeySchema }).strict(),
+    output: prChecksSchema,
   },
   thread_resolve: {
     input: z.object({ key: prKeySchema, itemId: z.string().min(1).max(200), resolved: z.boolean() }).strict(),
@@ -262,6 +268,28 @@ export default async function plugin(bb: BbPluginApi) {
     return normalizeDetail(raw, prKey(ref));
   }
 
+  // The tab, the list and several windows can poll the same PR; they share
+  // one GitHub call every few seconds.
+  const checksCache = new Map<string, { at: number; promise: Promise<PrChecks> }>();
+  function getChecks(ref: PrRef): Promise<PrChecks> {
+    const key = prKey(ref);
+    const cached = checksCache.get(key);
+    if (cached !== undefined && Date.now() - cached.at < 5_000) return cached.promise;
+    const promise = github<{ repository: { pullRequest: RawPrChecks | null } | null }>(PR_CHECKS_QUERY, {
+      owner: ref.owner,
+      name: ref.name,
+      number: ref.number,
+    }).then((data) => {
+      const raw = data.repository?.pullRequest ?? null;
+      if (raw === null) throw new Error(`Pull request ${key} not found`);
+      return normalizeChecks(raw, Date.now());
+    });
+    checksCache.set(key, { at: Date.now(), promise });
+    promise.catch(() => checksCache.delete(key));
+    if (checksCache.size > 200) checksCache.delete(checksCache.keys().next().value!);
+    return promise;
+  }
+
   async function listPullRequests(scope: PrScope, includeClosed: boolean, query: string) {
     const data = await github<{ search: { issueCount: number; nodes: (RawPullRequest | Record<string, never>)[] } }>(
       SEARCH_QUERY,
@@ -335,6 +363,7 @@ export default async function plugin(bb: BbPluginApi) {
       if (remove.length > 0) await githubRest("DELETE", path, { reviewers: remove });
       return { ok: true as const };
     },
+    pr_checks: ({ key }) => getChecks(key),
     thread_resolve: async ({ key, itemId, resolved }) => {
       // Re-read the PR so only one of its own review threads can be touched.
       const item = (await getPullRequest(key)).feed.find((candidate) => candidate.id === itemId);
