@@ -51,7 +51,7 @@ export function PrGlyphIcon({ kind, label }: { kind: PrGlyph; label: string }) {
   );
 }
 
-export type CheckGlyph = "success" | "failure" | "pending";
+export type CheckGlyph = "success" | "failure" | "pending" | "skipped";
 
 export function CheckGlyphIcon({ kind, label }: { kind: CheckGlyph; label: string }) {
   return (
@@ -59,6 +59,7 @@ export function CheckGlyphIcon({ kind, label }: { kind: CheckGlyph; label: strin
       <circle cx="8" cy="8" r="6.25" strokeDasharray={kind === "pending" ? "2.5 2" : undefined} />
       {kind === "success" ? <path d="M5.5 8.25l1.75 1.75 3.25-3.5" /> : null}
       {kind === "failure" ? <path d="M6 6l4 4M10 6l-4 4" /> : null}
+      {kind === "skipped" ? <path d="M5.5 8h5" /> : null}
     </Glyph>
   );
 }

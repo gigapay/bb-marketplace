@@ -1,7 +1,7 @@
 // One pull request: header, reviewers, description and the comment feed with
 // a queue to send to a BB thread. Shared by the GitHub page and the thread
 // side-panel tab.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import {
@@ -20,6 +20,7 @@ import type { rpcContract } from "../server";
 import type { Audience } from "../shared/audience";
 import { Composer, Discussion } from "./Discussion";
 import { usePrDetail } from "./useThreadPr";
+import { ChecksSection, usePrChecks } from "./Checks";
 import { ChecksIcon, EmptyState, ErrorLine, LabelChip, PrStateIcon, ReviewChip, errorText, relativeTime, useDebounced } from "./shared";
 
 type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
@@ -38,6 +39,15 @@ export function PullRequestDetail({
   // Shared with the diff view, so resolving here updates it too.
   const { detail: pr, error, loading, refresh } = usePrDetail(prKey);
   const load = () => void refresh();
+  const checks = usePrChecks(prKey);
+  // A new push changes the head commit: reload so comments and diff stats follow.
+  const headSha = checks.checks?.headSha ?? null;
+  const seenSha = useRef<string | null>(null);
+  useEffect(() => {
+    if (headSha === null) return;
+    if (seenSha.current !== null && seenSha.current !== headSha) void refresh();
+    seenSha.current = headSha;
+  }, [headSha, refresh]);
 
   return (
     <div className="space-y-5">
@@ -52,8 +62,9 @@ export function PullRequestDetail({
         error === null ? <EmptyState>Loading {prKey}…</EmptyState> : null
       ) : (
         <>
-          <Header pr={pr} loading={loading} onRefresh={load} />
+          <Header pr={pr} liveChecks={checks.checks?.rollup} loading={loading} onRefresh={load} />
           {threadId === null ? <LinkedThreads branch={pr.headRefName} /> : null}
+          <ChecksSection state={checks} />
           <Reviewers pr={pr} rpc={rpc} onChanged={load} />
           <Section title="Description">
             {pr.body.trim() === "" ? (
@@ -81,7 +92,17 @@ function Section({ title, actions, children }: { title: string; actions?: ReactN
   );
 }
 
-function Header({ pr, loading, onRefresh }: { pr: PrDetail; loading: boolean; onRefresh: () => void }) {
+function Header({
+  pr,
+  liveChecks,
+  loading,
+  onRefresh,
+}: {
+  pr: PrDetail;
+  liveChecks: PrDetail["checks"] | undefined;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
   return (
     <div className="space-y-2">
       <div className="flex items-start gap-2">
@@ -109,7 +130,7 @@ function Header({ pr, loading, onRefresh }: { pr: PrDetail; loading: boolean; on
           <span className="text-[#1f883d]">+{pr.additions}</span> <span className="text-destructive">−{pr.deletions}</span> ·{" "}
           {pr.changedFiles} files
         </span>
-        <ChecksIcon checks={pr.checks} />
+        <ChecksIcon checks={liveChecks === undefined ? pr.checks : liveChecks} />
         <ReviewChip decision={pr.reviewDecision} />
         {pr.labels.map((label) => (
           <LabelChip key={label.name} name={label.name} color={label.color} />
