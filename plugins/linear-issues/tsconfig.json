@@ -28,6 +28,8 @@
     "lib",
     "hooks",
     "views",
-    "shared"
+    "shared",
+    "host.ts",
+    "contract.ts"
   ]
 }

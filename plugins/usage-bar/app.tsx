@@ -110,60 +110,59 @@ function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
   );
 }
 
+// Name and plan live in the icon's tooltip; the bars are what matter at a glance.
+function providerTitle({ provider, usage }: UsageRow): string {
+  return usage.status === "ok" && usage.planLabel !== null
+    ? `${provider.displayName} · ${usage.planLabel}`
+    : provider.displayName;
+}
+
+function RowIcon({ row }: { row: UsageRow }) {
+  return (
+    <span title={providerTitle(row)} className="flex h-4 shrink-0 items-center">
+      <ProviderIcon
+        providerKind="agent"
+        provider={row.provider}
+        fallback="Bot"
+        className="size-3.5"
+        aria-label={providerTitle(row)}
+      />
+    </span>
+  );
+}
+
 function ProviderBlock({ row, now }: { row: UsageRow; now: number }) {
   const { provider, usage, windows, message } = row;
   return (
-    <section aria-label={`${provider.displayName} usage`} className="min-w-0">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <ProviderIcon
-          providerKind="agent"
-          provider={provider}
-          fallback="Bot"
-          className="size-3.5 shrink-0"
-          aria-hidden
-        />
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-sidebar-foreground">
-          {provider.displayName}
-        </span>
-        {usage.status === "ok" && usage.planLabel !== null ? (
-          <span className="shrink-0 rounded-sm bg-sidebar-border/60 px-1 py-0.5 text-2xs leading-none text-subtle-foreground">
-            {usage.planLabel}
-          </span>
-        ) : null}
-      </div>
+    <section aria-label={`${provider.displayName} usage`} className="flex min-w-0 items-start gap-2">
+      <RowIcon row={row} />
       {message !== null ? (
         <p
-          className="mt-0.5 pl-5 text-2xs text-muted-foreground"
+          className="min-w-0 truncate text-2xs leading-4 text-muted-foreground"
           title={usage.status === "error" ? usage.message : undefined}
         >
           {message}
         </p>
-      ) : windows.length > 0 ? (
-        <div className="mt-1 grid grid-cols-[max-content_minmax(0,1fr)_2.25rem_max-content] gap-x-2 gap-y-0.5 pl-5">
+      ) : (
+        // Fixed side columns so bars line up across providers.
+        <div className="grid min-w-0 flex-1 grid-cols-[2rem_minmax(0,1fr)_2.25rem_2.75rem] gap-x-2 gap-y-0.5">
           {windows.map((window) => (
             <WindowRow key={window.label} window={window} now={now} />
           ))}
         </div>
-      ) : null}
+      )}
     </section>
   );
 }
 
 function CompactProviderRow({ row, now }: { row: UsageRow; now: number }) {
-  const { provider, usage, windows, message } = row;
+  const { provider, windows, message } = row;
   return (
     <section
       aria-label={`${provider.displayName} usage`}
       className="flex min-w-0 items-center gap-2"
-      title={provider.displayName + (usage.status === "ok" && usage.planLabel ? ` · ${usage.planLabel}` : "")}
     >
-      <ProviderIcon
-        providerKind="agent"
-        provider={provider}
-        fallback="Bot"
-        className="size-3.5 shrink-0"
-        aria-label={provider.displayName}
-      />
+      <RowIcon row={row} />
       {message !== null ? (
         <span className="min-w-0 truncate text-2xs text-muted-foreground">{message}</span>
       ) : (
@@ -344,7 +343,7 @@ function UsageBar() {
   }
 
   return (
-    <div className="flex flex-col gap-2 px-2.5 py-2">
+    <div className="flex flex-col gap-1.5 px-2.5 py-2">
       {empty}
       {rows.map((row) => (
         <ProviderBlock key={row.id} row={row} now={now} />

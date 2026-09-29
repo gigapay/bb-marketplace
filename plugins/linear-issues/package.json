@@ -10,13 +10,17 @@
     "name": "Linear Issues",
     "description": "Browse your Linear issues and start a BB thread from any ticket.",
     "branding": {
-      "icon": "SquareKanban"
+      "icon": "./assets/linear.svg",
+      "experimental_icons": {
+        "linear": "./assets/linear.svg"
+      }
     },
     "server": "./server.ts",
     "app": "./app.tsx",
     "skills": [
       "skills"
-    ]
+    ],
+    "host": "./host.ts"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.7",
