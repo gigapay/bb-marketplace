@@ -1,7 +1,7 @@
 // One pull request: header, reviewers, description and the comment feed with
 // a queue to send to a BB thread. Shared by the GitHub page and the thread
 // side-panel tab.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import {
@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import type { FeedItem, PrDetail, Reviewer } from "../detail";
 import type { rpcContract } from "../server";
 import type { Audience } from "../shared/audience";
+import { fetchPrDetail } from "./useThreadPr";
 import { ChecksIcon, EmptyState, ErrorLine, LabelChip, PrStateIcon, ReviewChip, errorText, relativeTime, useDebounced } from "./shared";
 
 type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
@@ -38,10 +39,14 @@ export function PullRequestDetail({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // The first load can use the cache the diff view shares; refreshes can't.
+  const loadedOnce = useRef(false);
   const load = useCallback(() => {
     let cancelled = false;
     setLoading(true);
-    rpc.call("pr_get", { key: prKey }).then(
+    const force = loadedOnce.current;
+    loadedOnce.current = true;
+    fetchPrDetail(rpc, prKey, force).then(
       (next) => {
         if (cancelled) return;
         setPr(next);

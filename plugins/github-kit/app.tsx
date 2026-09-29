@@ -1,5 +1,6 @@
-// bb-plugin-github-kit frontend: a GitHub page in the sidebar and a "Pull
-// request" tab in each thread's side panel. The page's subPath carries the
+// bb-plugin-github-kit frontend: a GitHub page in the sidebar, a "Pull
+// request" tab in each thread's side panel, and a diff renderer with inline
+// review comments. The page's subPath carries the
 // open PR, so deep links and back/forward work: /plugins/github-kit/pulls/owner/repo/123.
 import { useEffect, useState } from "react";
 import { definePluginApp, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
@@ -8,6 +9,7 @@ import { EmptyState, ErrorLine, errorText } from "./views/shared";
 import { PullRequestDetail } from "./views/PullRequestDetail";
 import { PullRequestList } from "./views/PullRequestList";
 import { THREAD_PANEL_ACTION_ID, ThreadPrPanel } from "./views/ThreadPrPanel";
+import { DiffWithComments } from "./views/DiffWithComments";
 import { parsePrKey, prKey } from "./shared/pr-ref";
 import type { rpcContract } from "./server";
 
@@ -74,5 +76,12 @@ export default definePluginApp((app) => {
     id: THREAD_PANEL_ACTION_ID,
     title: "Pull request",
     component: ThreadPrPanel,
+  });
+  // Opt-in: pick "GitHub review comments" in Settings → Appearance → Diff renderer.
+  app.slots.experimental_diffRenderer({
+    id: "review-comments",
+    title: "GitHub review comments",
+    description: "BB's diff, plus the thread PR's unresolved GitHub review comments inline.",
+    component: DiffWithComments,
   });
 });
