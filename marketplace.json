@@ -16,7 +16,7 @@
         "git": {
           "url": "https://github.com/yteruel31/bb-marketplace.git",
           "subdir": "plugins/linear-issues",
-          "range": "^0.1.0",
+          "range": ">=0.1.0 <1.0.0",
           "tagPrefix": "linear-issues/"
         }
       }

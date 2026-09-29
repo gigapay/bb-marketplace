@@ -15,12 +15,18 @@ import {
   errorText,
   relativeTime,
   stateTypeRank,
+  useDebounced,
 } from "./shared";
+import { useIssueLinks } from "./links";
 
-const SCOPES: { id: IssueScope; label: string }[] = [
+// "linked" is local: the issues that have at least one BB thread.
+type ListScope = Exclude<IssueScope, "all"> | "linked";
+
+const SCOPES: { id: ListScope; label: string }[] = [
   { id: "assigned", label: "Assigned" },
   { id: "created", label: "Created" },
   { id: "subscribed", label: "Subscribed" },
+  { id: "linked", label: "With threads" },
 ];
 
 type Group = { key: string; state: IssueSummary["state"]; issues: IssueSummary[] };
@@ -48,18 +54,10 @@ function byPriority(a: IssueSummary, b: IssueSummary): number {
   return rank(a.priority) - rank(b.priority) || b.updatedAt.localeCompare(a.updatedAt);
 }
 
-function useDebounced<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(timer);
-  }, [value, delayMs]);
-  return debounced;
-}
-
 export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) {
   const rpc = useRpc<typeof rpcContract>();
-  const [scope, setScope] = useState<IssueScope>("assigned");
+  const links = useIssueLinks();
+  const [scope, setScope] = useState<ListScope>("assigned");
   const [includeCompleted, setIncludeCompleted] = useState(false);
   const [search, setSearch] = useState("");
   const query = useDebounced(search.trim(), 300);
@@ -68,10 +66,22 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
+  // Sorted so a new Map instance with the same keys doesn't refetch.
+  const linkedKey = [...links.byIssue.keys()].sort().join(",");
+  const linkedDependency = scope === "linked" ? linkedKey : "";
+
   const load = useCallback(() => {
     let cancelled = false;
     setLoading(true);
-    rpc.call("issues_list", { scope, includeCompleted, query }).then(
+    const request =
+      scope === "linked"
+        ? rpc
+            .call("issues_by_identifiers", {
+              identifiers: linkedDependency === "" ? [] : linkedDependency.split(",").slice(0, 100),
+            })
+            .then(({ issues }) => ({ issues: filterLocally(issues, includeCompleted, query) }))
+        : rpc.call("issues_list", { scope, includeCompleted, query });
+    request.then(
       (result) => {
         if (cancelled) return;
         setIssues(result.issues);
@@ -87,7 +97,7 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
     return () => {
       cancelled = true;
     };
-  }, [rpc, scope, includeCompleted, query]);
+  }, [rpc, scope, includeCompleted, query, linkedDependency]);
 
   useEffect(() => load(), [load]);
 
@@ -186,7 +196,12 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
                 {isCollapsed ? null : (
                   <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
                     {group.issues.map((issue) => (
-                      <IssueRow key={issue.id} issue={issue} onOpen={() => onOpen(issue.identifier)} />
+                      <IssueRow
+                        key={issue.id}
+                        issue={issue}
+                        threadCount={links.byIssue.get(issue.identifier)?.length ?? 0}
+                        onOpen={() => onOpen(issue.identifier)}
+                      />
                     ))}
                   </ul>
                 )}
@@ -199,7 +214,24 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
   );
 }
 
-function IssueRow({ issue, onOpen }: { issue: IssueSummary; onOpen: () => void }) {
+function filterLocally(issues: IssueSummary[], includeCompleted: boolean, query: string): IssueSummary[] {
+  const needle = query.toLowerCase();
+  return issues.filter(
+    (issue) =>
+      (includeCompleted || (issue.state.type !== "completed" && issue.state.type !== "canceled")) &&
+      (needle === "" || issue.title.toLowerCase().includes(needle) || issue.identifier.toLowerCase().includes(needle)),
+  );
+}
+
+function IssueRow({
+  issue,
+  threadCount,
+  onOpen,
+}: {
+  issue: IssueSummary;
+  threadCount: number;
+  onOpen: () => void;
+}) {
   return (
     <li>
       <button
@@ -219,6 +251,15 @@ function IssueRow({ issue, onOpen }: { issue: IssueSummary; onOpen: () => void }
         {issue.project ? (
           <span className="hidden max-w-36 shrink-0 truncate text-xs text-muted-foreground md:inline">
             {issue.project.name}
+          </span>
+        ) : null}
+        {threadCount > 0 ? (
+          <span
+            aria-label={`${threadCount} linked ${threadCount === 1 ? "thread" : "threads"}`}
+            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent px-1.5 py-0.5 text-xs text-accent-foreground"
+          >
+            <Icon name="MessagesSquare" className="size-3" />
+            {threadCount}
           </span>
         ) : null}
         <span className="hidden w-20 shrink-0 text-right text-xs text-muted-foreground sm:inline">

@@ -18,7 +18,7 @@ Then install from the Plugins page, or run `bb plugin install linear-issues@yter
 
 ## Releasing
 
-Each plugin is tagged on its own with `<plugin-id>/vX.Y.Z`. The catalog uses a semver range, so a new tag reaches users without editing `marketplace.json`:
+Each plugin is tagged on its own with `<plugin-id>/vX.Y.Z`. The catalog uses the range `>=0.1.0 <1.0.0` (a plain `^0.x` would lock the minor version), so a new tag reaches users without editing `marketplace.json`:
 
 1. Bump `version` in `plugins/<id>/package.json`.
 2. Commit, then tag with `git tag <id>/vX.Y.Z` and run `git push --follow-tags`.

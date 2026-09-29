@@ -7,10 +7,11 @@ import type { PluginNavPanelProps } from "@get-bb/plugin-sdk/app";
 import { EmptyState, ErrorLine, errorText } from "./views/shared";
 import { IssueDetail } from "./views/IssueDetail";
 import { IssueList } from "./views/IssueList";
+import { ThreadHeaderLink } from "./views/ThreadHeaderLink";
 import type { rpcContract } from "./server";
+import { IDENTIFIER_PATTERN } from "./shared/links";
 
 const PANEL_PATH = "issues";
-const IDENTIFIER_PATTERN = /^[A-Za-z0-9]+-\d+$/;
 
 
 function LinearPage({ subPath }: PluginNavPanelProps) {
@@ -40,7 +41,7 @@ function LinearPage({ subPath }: PluginNavPanelProps) {
           </EmptyState>
         ) : status.viewer === null ? (
           <ErrorLine error={status.error ?? "Could not reach Linear."} />
-        ) : IDENTIFIER_PATTERN.test(identifier) ? (
+        ) : IDENTIFIER_PATTERN.test(identifier.toUpperCase()) ? (
           <IssueDetail identifier={identifier.toUpperCase()} onBack={backToList} />
         ) : (
           <IssueList onOpen={openIssue} />
@@ -57,5 +58,10 @@ export default definePluginApp((app) => {
     icon: "SquareKanban",
     path: PANEL_PATH,
     component: LinearPage,
+  });
+  app.slots.experimental_threadHeaderAction({
+    id: "linked-issue",
+    title: "Linear issue",
+    component: ThreadHeaderLink,
   });
 });

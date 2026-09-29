@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { buildIssuePrompt } from "@/lib/prompt";
 import type { IssueDetail as Issue, rpcContract } from "../server";
+import { SOURCE_LABELS, useIssueLinks, type LinkedThread } from "./links";
+import { ThreadPickerDialog } from "./pickers";
 import { EmptyState, ErrorLine, LabelChip, PriorityIcon, StateIcon, errorText, relativeTime } from "./shared";
 
 export function IssueDetail({ identifier, onBack }: { identifier: string; onBack: () => void }) {
@@ -56,8 +58,27 @@ export function IssueDetail({ identifier, onBack }: { identifier: string; onBack
 
 function IssueBody({ issue }: { issue: Issue }) {
   const sdk = useSdk();
+  const rpc = useRpc<typeof rpcContract>();
   const navigate = useBbNavigate();
-  const { projectId } = useBbContext();
+  const { projectId: routeProjectId } = useBbContext();
+  const links = useIssueLinks();
+  const linked = links.byIssue.get(issue.identifier) ?? [];
+  const [threadPickerOpen, setThreadPickerOpen] = useState(false);
+  // undefined while loading, so the composer mounts once with the right seed
+  // instead of re-seeding (and dropping the user's picks) when it arrives.
+  const [teamProjectId, setTeamProjectId] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    rpc.call("team_project_get", { teamKey: issue.team.key }).then(
+      (result) => !cancelled && setTeamProjectId(result.projectId),
+      () => !cancelled && setTeamProjectId(null),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [rpc, issue.team.key]);
+  const defaultProjectId = teamProjectId ?? routeProjectId ?? undefined;
   const composerRef = useRef<HTMLDivElement>(null);
   const [focusRequest, setFocusRequest] = useState(0);
   const initialPrompt = useMemo(() => buildIssuePrompt(issue), [issue]);
@@ -137,6 +158,57 @@ function IssueBody({ issue }: { issue: Issue }) {
         ) : null}
       </dl>
 
+      <section className="mt-6">
+        <div className="mb-2 flex items-center gap-2">
+          <h2 className="text-sm font-medium">Threads</h2>
+          <span className="text-sm text-muted-foreground">{linked.length}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 text-muted-foreground"
+            onClick={() => setThreadPickerOpen(true)}
+          >
+            <Icon name="Link" className="size-4" />
+            Link a thread
+          </Button>
+        </div>
+        {linked.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No thread yet. Start one below, link an existing one, or use a branch containing{" "}
+            <code>{issue.identifier.toLowerCase()}</code>.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border rounded-lg border border-border bg-card">
+            {linked.map((entry) => (
+              <LinkedThreadRow
+                key={entry.thread.id}
+                entry={entry}
+                projectName={links.projectName(entry.thread.projectId)}
+                onOpen={() => navigate.toThread(entry.thread.id)}
+                onUnlink={() => {
+                  rpc
+                    .call("link_set", { threadId: entry.thread.id, identifier: null })
+                    .catch((cause) => toast.error(errorText(cause)));
+                }}
+              />
+            ))}
+          </ul>
+        )}
+        <ThreadPickerDialog
+          open={threadPickerOpen}
+          onOpenChange={setThreadPickerOpen}
+          threads={links.threads.filter((thread) => links.byThread.get(thread.id)?.identifier !== issue.identifier)}
+          projectName={links.projectName}
+          onPick={(thread) => {
+            setThreadPickerOpen(false);
+            rpc.call("link_set", { threadId: thread.id, identifier: issue.identifier }).then(
+              () => toast.success(`Linked to ${issue.identifier}`),
+              (cause) => toast.error(errorText(cause)),
+            );
+          }}
+        />
+      </section>
+
       {issue.parent ? (
         <p className="mt-3 text-sm text-muted-foreground">
           Sub-issue of <IssueLink identifier={issue.parent.identifier} /> {issue.parent.title}
@@ -185,24 +257,87 @@ function IssueBody({ issue }: { issue: Issue }) {
       ) : null}
 
       <section ref={composerRef} className="mt-8 scroll-mt-4">
-        <h2 className="mb-2 text-sm font-medium">Start a thread from this issue</h2>
-        <NewThreadComposer
-          layout="document"
-          initialPrompt={initialPrompt}
-          focusRequest={focusRequest}
-          draftKey={`issue:${issue.id}`}
-          {...(projectId ? { defaultProjectId: projectId } : {})}
-          onSubmit={async (request) => {
-            const thread = await sdk.threads.spawn({
-              ...request,
-              title: `${issue.identifier}: ${issue.title}`,
-              pluginMetadata: { issueId: issue.id, issueIdentifier: issue.identifier, issueUrl: issue.url },
-            });
-            navigate.toThread(thread.id);
-          }}
-        />
+        <h2 className="mb-1 text-sm font-medium">Start a thread from this issue</h2>
+        <p className="mb-2 text-xs text-muted-foreground">
+          Pick the project in the row under the prompt. The last project you used for {issue.team.name} is
+          preselected.
+        </p>
+        {teamProjectId === undefined ? (
+          <EmptyState>Loading composer…</EmptyState>
+        ) : (
+          <NewThreadComposer
+            layout="document"
+            initialPrompt={initialPrompt}
+            focusRequest={focusRequest}
+            draftKey={`issue:${issue.id}`}
+            {...(defaultProjectId ? { defaultProjectId } : {})}
+            onSubmit={async (request) => {
+              const thread = await sdk.threads.spawn({
+                ...request,
+                title: `${issue.identifier}: ${issue.title}`,
+                pluginMetadata: { issueId: issue.id, issueIdentifier: issue.identifier, issueUrl: issue.url },
+              });
+              // The thread exists at this point; a failed link must not
+              // keep the draft around and invite a duplicate submit.
+              await rpc
+                .call("spawn_recorded", {
+                  threadId: thread.id,
+                  identifier: issue.identifier,
+                  teamKey: issue.team.key,
+                  projectId: request.projectId,
+                })
+                .catch((cause) => toast.error(`Thread created but not linked: ${errorText(cause)}`));
+              navigate.toThread(thread.id);
+            }}
+          />
+        )}
       </section>
     </article>
+  );
+}
+
+function LinkedThreadRow({
+  entry,
+  projectName,
+  onOpen,
+  onUnlink,
+}: {
+  entry: LinkedThread;
+  projectName: string | null;
+  onOpen: () => void;
+  onUnlink: () => void;
+}) {
+  const { thread, source } = entry;
+  const busy = thread.status === "active" || thread.status === "starting";
+  return (
+    <li className="flex items-center gap-3 px-3 py-2 text-sm">
+      <span
+        aria-label={thread.indicatorLabel ?? (busy ? "Running" : "Idle")}
+        className={`size-2 shrink-0 rounded-full ${busy ? "animate-pulse bg-primary" : thread.hasPendingInteraction ? "bg-destructive" : "bg-muted-foreground/40"}`}
+      />
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
+        <span className="block truncate hover:underline">{thread.displayTitle}</span>
+        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="truncate">{projectName ?? "Unknown project"}</span>
+          {thread.environment?.branchName ? (
+            <span className="inline-flex min-w-0 items-center gap-1 font-mono">
+              <Icon name="GitBranch" className="size-3 shrink-0" />
+              <span className="truncate">{thread.environment.branchName}</span>
+            </span>
+          ) : null}
+          <span className="shrink-0">· {SOURCE_LABELS[source]}</span>
+        </span>
+      </button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+        aria-label={`Unlink ${thread.displayTitle}`}
+        onClick={onUnlink}
+      >
+        <Icon name="Unlink" className="size-4" />
+      </Button>
+    </li>
   );
 }
 
