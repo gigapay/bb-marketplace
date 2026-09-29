@@ -1,0 +1,119 @@
+import type { PluginBrowserBbSdk } from "@get-bb/plugin-sdk/app";
+
+export type UsageLimits = Awaited<
+  ReturnType<PluginBrowserBbSdk["system"]["usageLimits"]>
+>;
+export type ProviderUsage = UsageLimits[string];
+export type UsageWindow = Extract<ProviderUsage, { status: "ok" }>["windows"][number];
+
+export interface UsageSnapshot {
+  data: UsageLimits | null;
+  error: string | null;
+  refreshing: boolean;
+  /** Epoch ms of the last successful load. */
+  loadedAt: number | null;
+}
+
+let snapshot: UsageSnapshot = {
+  data: null,
+  error: null,
+  refreshing: false,
+  loadedAt: null,
+};
+const listeners = new Set<() => void>();
+let inFlight: Promise<void> | null = null;
+
+function update(next: Partial<UsageSnapshot>): void {
+  snapshot = { ...snapshot, ...next };
+  for (const listener of listeners) listener();
+}
+
+export function subscribeUsage(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+export function getUsageSnapshot(): UsageSnapshot {
+  return snapshot;
+}
+
+/**
+ * Every call hits the provider bridges (no server-side cache), so callers pass
+ * `maxAgeMs` and concurrent calls share one request.
+ */
+export function refreshUsage(
+  sdk: PluginBrowserBbSdk,
+  maxAgeMs: number,
+): Promise<void> {
+  if (inFlight !== null) return inFlight;
+  if (snapshot.loadedAt !== null && Date.now() - snapshot.loadedAt < maxAgeMs)
+    return Promise.resolve();
+  update({ refreshing: true });
+  inFlight = sdk.system
+    .usageLimits({ signal: AbortSignal.timeout(60_000) })
+    .then(
+      (data) => update({ data, error: null, loadedAt: Date.now() }),
+      (cause: unknown) => {
+        console.warn("[usage-bar] usage refresh failed", cause);
+        // Keep the last good data on screen; only flag the failure.
+        update({ error: "Couldn’t refresh usage." });
+      },
+    )
+    .finally(() => {
+      inFlight = null;
+      update({ refreshing: false });
+    });
+  return inFlight;
+}
+
+/** Short column label: "5h", "7d", "1d", or the provider's own label (e.g. a model family). */
+export function shortWindowLabel(window: UsageWindow): string {
+  const model = Reflect.get(window, "model");
+  if (typeof model !== "string" || model === "") {
+    switch (Reflect.get(window, "kind")) {
+      case "five-hour":
+        return "5h";
+      case "weekly":
+        return "7d";
+      case "daily":
+        return "1d";
+    }
+  }
+  return window.label
+    .replace(/^(Current session|Five-hour limit|5 hours)$/u, "5h")
+    .replace(/^Weekly( limit)?$/u, "7d")
+    .replace(/^Daily( limit)?$/u, "1d");
+}
+
+export function usageTone(usedPercent: number): "ok" | "warning" | "critical" {
+  if (usedPercent >= 95) return "critical";
+  return usedPercent >= 80 ? "warning" : "ok";
+}
+
+export function formatCountdown(resetsAt: string | null, now: number): string | null {
+  if (resetsAt === null) return null;
+  const remaining = new Date(resetsAt).getTime() - now;
+  if (!Number.isFinite(remaining)) return null;
+  if (remaining <= 0) return "now";
+  const minutes = Math.ceil(remaining / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return minutes % 60 === 0 ? `${hours}h` : `${hours}h${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return hours % 24 === 0 ? `${days}d` : `${days}d${hours % 24}h`;
+}
+
+export function describeWindow(window: UsageWindow): string {
+  const parts = [`${window.label}: ${Math.round(window.usedPercent)}% used`];
+  if (window.cost !== undefined)
+    parts.push(
+      `$${(window.cost.usedUsdCents / 100).toFixed(2)} / $${(window.cost.limitUsdCents / 100).toFixed(2)}`,
+    );
+  const reset = window.resetsAt === null ? null : new Date(window.resetsAt);
+  parts.push(
+    reset === null || Number.isNaN(reset.getTime())
+      ? "reset time not reported"
+      : `resets ${reset.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`,
+  );
+  return parts.join(" · ");
+}

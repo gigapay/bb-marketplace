@@ -1,0 +1,11 @@
+Keep an eye on your Claude Code and Codex quotas without clicking anything.
+
+## What you get
+
+- A usage card pinned above the sidebar footer icons, visible on every screen.
+- One bar per quota window (5h session, weekly, model windows like Fable) with the percentage used and a reset countdown.
+- Colors that turn amber at 80% and red at 95%.
+
+## How it works
+
+The card reads the same host-local usage BB's own Provider usage plugin shows, on the primary machine. It refreshes every couple of minutes, on focus, and right after a thread finishes a turn. Click the footer icon to hide or re-pin it.

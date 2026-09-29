@@ -10,14 +10,44 @@
       "displayName": "Linear Issues",
       "description": "Browse your Linear issues and start a BB thread from any ticket.",
       "icon": "SquareKanban",
-      "tags": ["linear", "issues", "productivity"],
-      "author": { "name": "Yoann Teruel", "github": "yteruel31" },
+      "tags": [
+        "linear",
+        "issues",
+        "productivity"
+      ],
+      "author": {
+        "name": "Yoann Teruel",
+        "github": "yteruel31"
+      },
       "source": {
         "git": {
           "url": "https://github.com/yteruel31/bb-marketplace.git",
           "subdir": "plugins/linear-issues",
           "range": ">=0.1.0 <1.0.0",
           "tagPrefix": "linear-issues/"
+        }
+      }
+    },
+    {
+      "id": "usage-bar",
+      "displayName": "Usage Bar",
+      "description": "Always-visible provider usage bars in the sidebar footer, Orca style.",
+      "icon": "ChartColumn",
+      "tags": [
+        "usage",
+        "providers",
+        "productivity"
+      ],
+      "author": {
+        "name": "Yoann Teruel",
+        "github": "yteruel31"
+      },
+      "source": {
+        "git": {
+          "url": "https://github.com/yteruel31/bb-marketplace.git",
+          "subdir": "plugins/usage-bar",
+          "range": ">=0.1.0 <1.0.0",
+          "tagPrefix": "usage-bar/"
         }
       }
     }
