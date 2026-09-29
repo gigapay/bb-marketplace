@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { UrlLink, useRpc } from "@get-bb/plugin-sdk/app";
+import { useRpc } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Icon } from "@/components/ui/icon";
@@ -40,7 +40,7 @@ function groupByRepository(pullRequests: PullRequest[]): Group[] {
   return [...groups.values()];
 }
 
-export function PullRequestList({ viewer }: { viewer: string }) {
+export function PullRequestList({ viewer, onOpen }: { viewer: string; onOpen: (key: string) => void }) {
   const rpc = useRpc<typeof rpcContract>();
   const [scope, setScope] = useState<PrScope>("review");
   const [includeClosed, setIncludeClosed] = useState(false);
@@ -156,7 +156,7 @@ export function PullRequestList({ viewer }: { viewer: string }) {
                 {isCollapsed ? null : (
                   <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
                     {group.pullRequests.map((pr) => (
-                      <PullRequestRow key={pr.id} pr={pr} viewer={viewer} />
+                      <PullRequestRow key={pr.id} pr={pr} viewer={viewer} onOpen={() => onOpen(`${pr.repository}#${pr.number}`)} />
                     ))}
                   </ul>
                 )}
@@ -174,14 +174,14 @@ export function PullRequestList({ viewer }: { viewer: string }) {
   );
 }
 
-function PullRequestRow({ pr, viewer }: { pr: PullRequest; viewer: string }) {
+function PullRequestRow({ pr, viewer, onOpen }: { pr: PullRequest; viewer: string; onOpen: () => void }) {
   const author = pr.author?.login ?? "ghost";
   return (
     <li>
-      <UrlLink
-        href={pr.url}
-        target="_blank"
-        className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-foreground no-underline hover:bg-accent/50"
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-accent/50"
       >
         <PrStateIcon pr={pr} />
         <span className="w-14 shrink-0 font-mono text-xs text-muted-foreground">#{pr.number}</span>
@@ -205,7 +205,7 @@ function PullRequestRow({ pr, viewer }: { pr: PullRequest; viewer: string }) {
         <span className="hidden w-20 shrink-0 text-right text-xs text-muted-foreground sm:inline">
           {relativeTime(pr.updatedAt)}
         </span>
-      </UrlLink>
+      </button>
     </li>
   );
 }

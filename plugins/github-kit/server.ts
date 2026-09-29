@@ -8,8 +8,12 @@ import { promisify } from "node:util";
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { PR_SCOPES, buildPrSearch, type PrScope } from "./shared/search";
+import { PR_DETAIL_QUERY, actorSchema, normalizeDetail, prDetailSchema, type PrDetail, type RawPrDetail } from "./detail";
+import { parsePrKey, prKey, type PrRef } from "./shared/pr-ref";
+import { buildCommentsPrompt } from "./shared/prompt";
 
-const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
+const GITHUB_API_URL = "https://api.github.com";
+const GITHUB_GRAPHQL_URL = `${GITHUB_API_URL}/graphql`;
 const PAGE_SIZE = 50;
 
 const checksStateSchema = z.enum(["SUCCESS", "FAILURE", "ERROR", "PENDING", "EXPECTED"]);
@@ -37,6 +41,19 @@ const pullRequestSchema = z.object({
 export type PullRequest = z.infer<typeof pullRequestSchema>;
 
 const scopeSchema = z.enum(PR_SCOPES);
+const prKeySchema = z
+  .string()
+  .max(250)
+  .transform((value, context) => {
+    const ref = parsePrKey(value);
+    if (ref === null) {
+      context.addIssue({ code: "custom", message: "Expected owner/repo#number" });
+      return z.NEVER;
+    }
+    return ref;
+  });
+const loginSchema = z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]|\[bot\]){0,60}$/, "Invalid GitHub login");
+const threadIdSchema = z.string().min(1).max(100);
 
 export const rpcContract = defineRpcContract({
   status: {
@@ -57,6 +74,39 @@ export const rpcContract = defineRpcContract({
       })
       .strict(),
     output: z.object({ pullRequests: z.array(pullRequestSchema), total: z.number() }),
+  },
+  pr_get: {
+    input: z.object({ key: prKeySchema }).strict(),
+    output: prDetailSchema,
+  },
+  // The PR whose head is this branch, for threads where BB's own lookup
+  // found nothing (for example a branch that tracks the base branch).
+  pr_for_branch: {
+    input: z.object({ branch: z.string().min(1).max(250) }).strict(),
+    output: z.object({ key: z.string().nullable() }),
+  },
+  reviewer_candidates: {
+    input: z.object({ key: prKeySchema, query: z.string().trim().max(100) }).strict(),
+    output: z.object({ users: z.array(actorSchema.extend({ name: z.string().nullable(), suggested: z.boolean() })) }),
+  },
+  reviewers_update: {
+    input: z
+      .object({ key: prKeySchema, add: z.array(loginSchema).max(20), remove: z.array(loginSchema).max(20) })
+      .strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
+  // Queues selected comments as one message on a thread. The server
+  // re-reads the PR, so the prompt only ever carries GitHub's own text.
+  comments_send: {
+    input: z
+      .object({
+        threadId: threadIdSchema,
+        key: prKeySchema,
+        itemIds: z.array(z.string().min(1).max(200)).min(1).max(100),
+        note: z.string().max(4000),
+      })
+      .strict(),
+    output: z.object({ queued: z.number() }),
   },
 });
 
@@ -167,6 +217,38 @@ export default async function plugin(bb: BbPluginApi) {
     return body.data;
   }
 
+  async function githubRest(method: "POST" | "DELETE", path: string, body: unknown): Promise<void> {
+    const auth = await resolveToken();
+    if (auth === null) throw new Error("No GitHub token.");
+    const response = await fetch(`${GITHUB_API_URL}${path}`, {
+      method,
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${auth.token}`,
+        "Content-Type": "application/json",
+        "User-Agent": "bb-plugin-github-kit",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) {
+      const detail = (await response.json().catch(() => null)) as { message?: string } | null;
+      throw new Error(`GitHub ${method} failed with HTTP ${response.status}${detail?.message ? `: ${detail.message}` : ""}`);
+    }
+  }
+
+  async function getPullRequest(ref: PrRef): Promise<PrDetail> {
+    const data = await github<{ repository: { pullRequest: RawPrDetail | null } | null }>(PR_DETAIL_QUERY, {
+      owner: ref.owner,
+      name: ref.name,
+      number: ref.number,
+    });
+    const raw = data.repository?.pullRequest ?? null;
+    if (raw === null) throw new Error(`Pull request ${prKey(ref)} not found`);
+    return normalizeDetail(raw, prKey(ref));
+  }
+
   async function listPullRequests(scope: PrScope, includeClosed: boolean, query: string) {
     const data = await github<{ search: { issueCount: number; nodes: (RawPullRequest | Record<string, never>)[] } }>(
       SEARCH_QUERY,
@@ -191,6 +273,66 @@ export default async function plugin(bb: BbPluginApi) {
       }
     },
     prs_list: ({ scope, includeClosed, query }) => listPullRequests(scope, includeClosed, query),
+    pr_get: ({ key }) => getPullRequest(key),
+    pr_for_branch: async ({ branch }) => {
+      // involves:@me keeps a common name like "main" from matching strangers' PRs.
+      const q = `is:pr involves:@me head:"${branch.replace(/"/g, "")}" sort:updated-desc`;
+      const data = await github<{ search: { nodes: ({ number: number; headRefName: string; repository: { nameWithOwner: string } } | Record<string, never>)[] } }>(
+        `query Branch($q: String!) { search(query: $q, type: ISSUE, first: 5) { nodes { ... on PullRequest { number headRefName repository { nameWithOwner } } } } }`,
+        { q },
+      );
+      const match = data.search.nodes.find(
+        (node): node is { number: number; headRefName: string; repository: { nameWithOwner: string } } =>
+          "number" in node && node.headRefName === branch,
+      );
+      return { key: match ? `${match.repository.nameWithOwner}#${match.number}` : null };
+    },
+    reviewer_candidates: async ({ key, query }) => {
+      type RawUser = { __typename: string; login: string; avatarUrl: string; name?: string | null };
+      const data = await github<{
+        repository: {
+          assignableUsers: { nodes: RawUser[] };
+          pullRequest: { suggestedReviewers: { reviewer: RawUser }[] } | null;
+        } | null;
+      }>(
+        `query Candidates($owner: String!, $name: String!, $number: Int!, $query: String) {
+          repository(owner: $owner, name: $name) {
+            assignableUsers(first: 30, query: $query) { nodes { __typename login avatarUrl name } }
+            pullRequest(number: $number) { suggestedReviewers { reviewer { __typename login avatarUrl name } } }
+          }
+        }`,
+        { owner: key.owner, name: key.name, number: key.number, query: query === "" ? null : query },
+      );
+      const users = new Map<string, { login: string; avatarUrl: string; isBot: boolean; name: string | null; suggested: boolean }>();
+      const needle = query.toLowerCase();
+      for (const { reviewer } of data.repository?.pullRequest?.suggestedReviewers ?? []) {
+        if (needle !== "" && !`${reviewer.login} ${reviewer.name ?? ""}`.toLowerCase().includes(needle)) continue;
+        users.set(reviewer.login, { login: reviewer.login, avatarUrl: reviewer.avatarUrl, isBot: false, name: reviewer.name ?? null, suggested: true });
+      }
+      for (const user of data.repository?.assignableUsers.nodes ?? []) {
+        if (!users.has(user.login)) {
+          users.set(user.login, { login: user.login, avatarUrl: user.avatarUrl, isBot: user.__typename === "Bot", name: user.name ?? null, suggested: false });
+        }
+      }
+      return { users: [...users.values()] };
+    },
+    reviewers_update: async ({ key, add, remove }) => {
+      const path = `/repos/${key.owner}/${key.name}/pulls/${key.number}/requested_reviewers`;
+      if (add.length > 0) await githubRest("POST", path, { reviewers: add });
+      if (remove.length > 0) await githubRest("DELETE", path, { reviewers: remove });
+      return { ok: true as const };
+    },
+    comments_send: async ({ threadId, key, itemIds, note }) => {
+      const detail = await getPullRequest(key);
+      const wanted = new Set(itemIds);
+      const items = detail.feed.filter((item) => wanted.has(item.id));
+      if (items.length === 0) throw new Error("None of the selected comments exist anymore.");
+      await bb.sdk.threads.queuedMessages.create({
+        threadId,
+        input: [{ type: "text", text: buildCommentsPrompt(detail, items, note), mentions: [] }],
+      });
+      return { queued: items.length };
+    },
   });
 
   const usage = [

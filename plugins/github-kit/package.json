@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-github-kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "engines": {
     "bb": ">=0.44",
@@ -36,7 +36,8 @@
     "clsx": "^2.1.1",
     "hono": "^4.13.11",
     "tailwind-merge": "^3.4.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "sonner": "^1.7.4"
   },
   "scripts": {
     "test": "node --experimental-strip-types --test shared/*.test.ts",
