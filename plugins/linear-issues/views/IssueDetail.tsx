@@ -16,6 +16,7 @@ import { proxyLinearUploads } from "@/lib/uploads";
 import { buildIssuePrompt } from "@/lib/prompt";
 import type { IssueDetail as Issue, rpcContract } from "../server";
 import { SOURCE_LABELS, useIssueLinks, type LinkedThread } from "./links";
+import { CommentThreads } from "./Comments";
 import { ThreadPickerDialog } from "./pickers";
 import { EmptyState, ErrorLine, LabelChip, PriorityIcon, StateIcon, errorText, relativeTime } from "./shared";
 
@@ -23,10 +24,10 @@ export function IssueDetail({ identifier, onBack }: { identifier: string; onBack
   const rpc = useRpc<typeof rpcContract>();
   const [issue, setIssue] = useState<Issue | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setIssue(null);
     setError(null);
     rpc.call("issue_get", { id: identifier }).then(
       (result) => !cancelled && setIssue(result),
@@ -35,7 +36,9 @@ export function IssueDetail({ identifier, onBack }: { identifier: string; onBack
     return () => {
       cancelled = true;
     };
-  }, [rpc, identifier]);
+  }, [rpc, identifier, reloadNonce]);
+  // A new identifier starts from a blank page; a reload keeps the old one on screen.
+  useEffect(() => setIssue(null), [identifier]);
 
   return (
     <div>
@@ -51,13 +54,13 @@ export function IssueDetail({ identifier, onBack }: { identifier: string; onBack
           </div>
         ) : null
       ) : (
-        <IssueBody issue={issue} />
+        <IssueBody issue={issue} onChanged={() => setReloadNonce((n) => n + 1)} />
       )}
     </div>
   );
 }
 
-function IssueBody({ issue }: { issue: Issue }) {
+function IssueBody({ issue, onChanged }: { issue: Issue; onChanged: () => void }) {
   const sdk = useSdk();
   const rpc = useRpc<typeof rpcContract>();
   const navigate = useBbNavigate();
@@ -254,23 +257,9 @@ function IssueBody({ issue }: { issue: Issue }) {
         </section>
       ) : null}
 
-      {issue.comments.length ? (
-        <section className="mt-6">
-          <h2 className="mb-2 text-sm font-medium">Activity</h2>
-          <ol className="space-y-3">
-            {issue.comments.map((comment) => (
-              <li key={comment.id} className="rounded-lg border border-border bg-card p-3">
-                <p className="mb-1 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">{comment.user?.name ?? "Unknown"}</span>
-                  {" · "}
-                  {relativeTime(comment.createdAt)}
-                </p>
-                <Markdown content={proxyLinearUploads(comment.body)} />
-              </li>
-            ))}
-          </ol>
-        </section>
-      ) : null}
+      <div className="mt-6">
+        <CommentThreads issue={issue} onChanged={onChanged} />
+      </div>
 
       <section ref={composerRef} className="mt-8 scroll-mt-4">
         <h2 className="mb-1 text-sm font-medium">Start a thread from this issue</h2>

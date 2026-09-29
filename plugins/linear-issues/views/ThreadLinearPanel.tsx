@@ -9,8 +9,9 @@ import { proxyLinearUploads } from "@/lib/uploads";
 import type { IssueDetail, rpcContract } from "../server";
 import { issueIdentifierFromBranch } from "../shared/links";
 import { SOURCE_LABELS, useIssueLinks } from "./links";
+import { CommentThreads } from "./Comments";
 import { IssuePickerDialog } from "./pickers";
-import { EmptyState, ErrorLine, LabelChip, PriorityIcon, StateIcon, errorText, relativeTime } from "./shared";
+import { EmptyState, ErrorLine, LabelChip, PriorityIcon, StateIcon, errorText } from "./shared";
 
 export const THREAD_PANEL_ACTION_ID = "linear-issue";
 
@@ -217,23 +218,7 @@ function LinkedIssue({
             </section>
           ) : null}
 
-          {issue.comments.length ? (
-            <section>
-              <h3 className="mb-1.5 text-sm font-medium">Activity</h3>
-              <ol className="space-y-2">
-                {issue.comments.map((comment) => (
-                  <li key={comment.id} className="rounded-lg border border-border bg-card p-2.5">
-                    <p className="mb-1 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">{comment.user?.name ?? "Unknown"}</span>
-                      {" · "}
-                      {relativeTime(comment.createdAt)}
-                    </p>
-                    <Markdown content={proxyLinearUploads(comment.body)} />
-                  </li>
-                ))}
-              </ol>
-            </section>
-          ) : null}
+          <CommentThreads issue={issue} onChanged={load} />
         </>
       )}
     </article>

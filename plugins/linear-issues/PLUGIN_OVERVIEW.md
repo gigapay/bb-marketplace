@@ -4,7 +4,7 @@ Adds a Linear page to the sidebar and ties your BB threads to your Linear ticket
 
 The Linear page lists the issues assigned to you, created by you, or that you're subscribed to. They're grouped by workflow state, and you can search them or show done issues. A "With threads" tab shows only the issues that already have a BB thread, and every row shows how many threads it has.
 
-Open an issue to read its description, sub-issues and comments, and to see the threads linked to it. From there you can start a new thread. The composer is prefilled with the ticket and preselects the last project you used for that Linear team.
+Open an issue to read its description and sub-issues, follow its comment discussions (replies grouped under their comment, resolved ones folded away), post a comment or reply, and to see the threads linked to it. From there you can start a new thread. The composer is prefilled with the ticket and preselects the last project you used for that Linear team.
 
 The home screen gets a "Linear issues" section with your most urgent open issues. Start one right into the composer above it, or jump to its latest thread.
 
@@ -22,4 +22,4 @@ Agents get `bb linear-issues current`, `show`, `link` and `unlink`.
 
 ## Requirements
 
-You need a Linear personal API key. Set it in the plugin settings, or run `bb plugin config linear-issues set apiKey <key>`. The key stays on the BB server. The plugin never writes to Linear.
+You need a Linear personal API key. Set it in the plugin settings, or run `bb plugin config linear-issues set apiKey <key>`. The key stays on the BB server. The only thing the plugin ever writes to Linear is a comment or reply that you send yourself from a ticket.

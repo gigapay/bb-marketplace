@@ -5,7 +5,7 @@ description: Read Linear issues and link BB threads to them with the `bb linear-
 
 # Linear issues
 
-The Linear plugin reads issues with the user's own Linear API key. It never changes an issue in Linear. It only records which BB thread works on which issue.
+The Linear plugin reads issues with the user's own Linear API key. The CLI never changes an issue in Linear: it only reads tickets and records which BB thread works on which issue. Comments are posted only by the user, from the plugin's UI. Don't try to post to Linear on their behalf.
 
 | Command | Effect |
 | --- | --- |

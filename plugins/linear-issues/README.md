@@ -42,6 +42,10 @@ BB's sidebar belongs to its bundled thread-list plugin, which has no extension p
 
 Linear serves pasted images and attachments from `uploads.linear.app` only when the request carries the API key. The server exposes `GET /api/v1/plugins/linear-issues/http/upload?url=…` (auth `local`), which fetches the file with the key and streams it back. It only proxies `https://uploads.linear.app`, so the key can't be sent anywhere else. `lib/uploads.ts` rewrites those URLs in descriptions and comments before they reach `Markdown`. Non-image files are served as downloads, and responses carry `nosniff` plus a sandboxing CSP.
 
+## Comments
+
+`views/Comments.tsx` groups Linear's flat comment list into discussions with `shared/comments.ts`: each root comment with its replies, since Linear nests one level. Resolved discussions are folded away, and comments from integrations show the bot or external author. Comments and replies are posted through the `comment_create` RPC (`commentCreate` mutation) as the API key's owner, only when the user presses Comment or Reply. That is the plugin's only write to Linear. The agent CLI stays read-only.
+
 ## Thread links
 
 A thread is linked to an issue when it was started from a ticket (issue page or composer button), when you link it by hand (from the thread header, the issue page, or `bb linear-issues link <id>`), when its worktree branch contains the identifier, or when it shares a worktree whose linked threads all point at one issue. Stored links live in the plugin's SQLite database. A stored row overrides the branch match, and a stored "unlinked" row hides one. Branch matches are computed on read from `environment.branchName`, and only keys of real Linear teams count.

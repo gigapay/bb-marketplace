@@ -5,6 +5,7 @@
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { hostContract, hostSignals } from "./contract.js";
+import { groupCommentThreads } from "./shared/comments.js";
 import { registerLinearWorktree } from "./worktree/provider.js";
 import { IDENTIFIER_PATTERN, LINKS_CHANGED, linkedIssueFromPrompt, resolveLink, resolveThreadLinks } from "./shared/links";
 
@@ -49,8 +50,17 @@ const commentSchema = z.object({
   id: z.string(),
   body: z.string(),
   createdAt: z.string(),
+  editedAt: z.string().nullable(),
+  url: z.string(),
+  parentId: z.string().nullable(),
+  resolvedAt: z.string().nullable(),
+  resolvedBy: z.string().nullable(),
+  quotedText: z.string().nullable(),
+  // Integrations (GitHub, Slack, …) post as bots or external users.
+  author: z.object({ name: z.string(), kind: z.enum(["user", "bot", "external"]) }),
   user: userSchema.nullable(),
 });
+export type IssueComment = z.infer<typeof commentSchema>;
 
 const issueDetailSchema = issueSummarySchema.extend({
   description: z.string().nullable(),
@@ -106,6 +116,17 @@ export const rpcContract = defineRpcContract({
   issue_get: {
     input: z.object({ id: z.string().min(1).max(100) }).strict(),
     output: issueDetailSchema,
+  },
+  // Writes to Linear as the API key's owner; only ever called on an explicit send.
+  comment_create: {
+    input: z
+      .object({
+        issueId: z.string().min(1).max(100),
+        body: z.string().trim().min(1).max(50_000),
+        parentId: z.string().min(1).max(100).nullable(),
+      })
+      .strict(),
+    output: z.object({ id: z.string() }),
   },
   issues_by_identifiers: {
     input: z.object({ identifiers: z.array(identifierSchema).max(100) }).strict(),
@@ -185,6 +206,10 @@ function issuesQuery(scope: IssueScope): string {
   }`;
 }
 
+const COMMENT_CREATE_MUTATION = `mutation CommentCreate($input: CommentCreateInput!) {
+  commentCreate(input: $input) { success comment { id } }
+}`;
+
 const TEAMS_QUERY = `query Teams { teams(first: 250) { nodes { key } } }`;
 
 const ISSUE_DETAIL_QUERY = `query Issue($id: String!) {
@@ -194,20 +219,62 @@ const ISSUE_DETAIL_QUERY = `query Issue($id: String!) {
     cycle { id name number }
     parent { id identifier title }
     children(first: 50) { nodes { id identifier title state { ${STATE_FIELDS} } } }
-    comments(first: 50, orderBy: createdAt) {
-      nodes { id body createdAt user { ${USER_FIELDS} } }
+    comments(first: 100, orderBy: createdAt) {
+      nodes {
+        id body createdAt editedAt url quotedText resolvedAt
+        parent { id }
+        resolvingUser { name }
+        user { ${USER_FIELDS} }
+        botActor { name }
+        externalUser { name }
+      }
     }
   }
 }`;
 
 type Connection<T> = { nodes: T[] };
+type RawComment = {
+  id: string;
+  body: string;
+  createdAt: string;
+  editedAt: string | null;
+  url: string;
+  quotedText: string | null;
+  resolvedAt: string | null;
+  parent: { id: string } | null;
+  resolvingUser: { name: string } | null;
+  user: IssueComment["user"];
+  botActor: { name: string | null } | null;
+  externalUser: { name: string } | null;
+};
+
+function flattenComment(raw: RawComment): IssueComment {
+  const author = raw.user
+    ? { name: raw.user.name, kind: "user" as const }
+    : raw.botActor?.name
+      ? { name: raw.botActor.name, kind: "bot" as const }
+      : { name: raw.externalUser?.name ?? "Unknown", kind: "external" as const };
+  return {
+    id: raw.id,
+    body: raw.body,
+    createdAt: raw.createdAt,
+    editedAt: raw.editedAt,
+    url: raw.url,
+    parentId: raw.parent?.id ?? null,
+    resolvedAt: raw.resolvedAt,
+    resolvedBy: raw.resolvingUser?.name ?? null,
+    quotedText: raw.quotedText,
+    author,
+    user: raw.user,
+  };
+}
 type RawSummary = Omit<IssueSummary, "labels"> & {
   labels: Connection<IssueSummary["labels"][number]>;
 };
 type RawDetail = Omit<IssueDetail, "labels" | "children" | "comments"> & {
   labels: Connection<IssueSummary["labels"][number]>;
   children: Connection<IssueDetail["children"][number]>;
-  comments: Connection<IssueDetail["comments"][number]>;
+  comments: Connection<RawComment>;
 };
 
 function flattenSummary(raw: RawSummary): IssueSummary {
@@ -219,7 +286,7 @@ function flattenDetail(raw: RawDetail): IssueDetail {
     ...raw,
     labels: raw.labels.nodes,
     children: raw.children.nodes,
-    comments: raw.comments.nodes,
+    comments: raw.comments.nodes.map(flattenComment),
   };
 }
 
@@ -537,6 +604,16 @@ export default async function plugin(bb: BbPluginApi) {
       issues: await listIssues(scope, includeCompleted, query),
     }),
     issue_get: ({ id }) => getIssue(id),
+    comment_create: async ({ issueId, body, parentId }) => {
+      const data = await linear<{ commentCreate: { success: boolean; comment: { id: string } | null } }>(
+        COMMENT_CREATE_MUTATION,
+        { input: { issueId, body, ...(parentId ? { parentId } : {}) } },
+      );
+      if (!data.commentCreate.success || data.commentCreate.comment === null) {
+        throw new Error("Linear didn't accept the comment");
+      }
+      return { id: data.commentCreate.comment.id };
+    },
     issues_by_identifiers: async ({ identifiers }) => ({
       issues: await issuesByIdentifiers([...new Set(identifiers)]),
     }),
@@ -714,8 +791,12 @@ function formatIssueText(issue: IssueDetail): string {
   if (issue.project) lines.push(`Project: ${issue.project.name}`);
   if (issue.labels.length) lines.push(`Labels: ${issue.labels.map((l) => l.name).join(", ")}`);
   lines.push("", issue.description?.trim() || "(no description)");
-  for (const comment of issue.comments) {
-    lines.push("", `--- ${comment.user?.name ?? "Unknown"} (${comment.createdAt})`, comment.body);
+  for (const thread of groupCommentThreads(issue.comments)) {
+    const status = thread.resolved ? " [resolved]" : "";
+    lines.push("", `--- ${thread.root.author.name} (${thread.root.createdAt})${status}`, thread.root.body);
+    for (const reply of thread.replies) {
+      lines.push(`    ↳ ${reply.author.name} (${reply.createdAt})`, ...reply.body.split("\n").map((line) => `      ${line}`));
+    }
   }
   return lines.join("\n");
 }
