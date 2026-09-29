@@ -366,6 +366,7 @@ export default async function plugin(bb: BbPluginApi) {
       placement TEXT,
       created_at INTEGER NOT NULL
     )`,
+    `ALTER TABLE worktree_reservations ADD COLUMN target_path TEXT`,
   ]);
   const selectLinks = db.prepare(
     `SELECT thread_id AS threadId, issue_identifier AS identifier, source FROM thread_links`,

@@ -17,7 +17,7 @@ The key is a secret setting. It stays on the BB server and never reaches the bro
 The plugin registers its own environment provider, `linear-worktree` ("Linear worktree"), built from BB's bundled Worktree provider (see `worktree/ORIGIN.md`). It differs in three ways:
 
 - The branch is the ticket's Linear `branchName`, like `yoann/gig-123-fix-login`. The ticket comes from the thread's stored link or from a title or prompt that starts with the identifier. Threads without a ticket keep BB's generated name.
-- The `worktreesRoot` setting (for example `~/worktrees`) puts worktrees at `<folder>/<repo>/<last branch segment>`, like Orca does. Leave it empty to keep BB's per-attempt folder under its data dir.
+- The `worktreesRoot` setting (for example `~/worktrees`) puts worktrees at `<folder>/<repo>/<branch with / as ->`, like Orca does. Leave it empty to keep BB's per-attempt folder under its data dir.
 - Before creating anything, the server reserves a branch and folder that nobody uses yet (`-2`, `-3`, … when taken) and stores the choice per attempt, so retries reuse it. This matters because BB's create resets the branch (`git worktree add -B`) and clears the target folder, which is only safe on names nobody else holds.
 
 New worktrees always branch off the project's default (primary) branch. A "Work on" control beside the environment picker (`views/WorktreeInputs.tsx`) has three modes:
@@ -26,7 +26,7 @@ New worktrees always branch off the project's default (primary) branch. A "Work 
 - New worktree. Always starts fresh, and adds `-2` if the branch is taken.
 - An existing worktree of the repository, picked from the list.
 
-Adopted worktrees are attached with `ownsPath: false`. BB never deletes them and never runs setup or teardown scripts on them. Worktrees under BB's data dir or the plugin's worktrees folder are never offered, because BB may delete those when their environment retires.
+Adopted worktrees are attached with `ownsPath: false`. BB never deletes them and never runs setup or teardown scripts on them. Worktrees BB may delete when their environment retires are never offered. Those are the ones under BB's data dir, plus the ones this plugin created, which it tracks per attempt in `worktree_reservations.target_path`. Worktrees you made yourself stay adoptable even inside the worktrees folder. Folder names follow Orca's convention, the branch with `/` turned into `-`, so `~/dev/worktrees/gigapay-app/yoann-gig-123-fix-login`.
 
 ## Starting from BB's composer
 

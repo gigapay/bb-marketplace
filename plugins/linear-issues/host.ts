@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { access, readdir, rm } from "node:fs/promises";
+import { access, readdir, realpath, rm } from "node:fs/promises";
+import { resolve as resolvePath } from "node:path";
 import { promisify } from "node:util";
 import { experimental_defineHostEntry } from "@get-bb/plugin-sdk/host";
 import { hostContract, hostSignals } from "./contract.js";
@@ -71,20 +72,32 @@ function resolveTarget(args: {
   };
 }
 
-/**
- * Worktrees BB or this plugin created (and may delete on retirement): never
- * adoptable, or an adopted environment could lose its folder.
- */
-function managedRoots(dataDir: string, sourcePath: string, worktreesRoot: string | null): string[] {
-  const roots = [resolveWorktreesRoot(dataDir)];
-  if (worktreesRoot !== null) roots.push(resolveCustomRepoRoot({ worktreesRoot, sourcePath }));
-  return roots;
+async function canonical(path: string): Promise<string> {
+  return realpath(path).catch(() => resolvePath(path));
 }
 
-async function adoptableWorktrees(args: { sourcePath: string; roots: string[]; signal?: AbortSignal }) {
-  let entries = await listGitWorktrees(args);
-  for (const managedRoot of args.roots) entries = selectAdoptableWorktrees({ entries, managedRoot });
-  return entries.filter((entry) => !entry.prunable);
+/**
+ * Worktrees another environment may delete on retirement are never
+ * adoptable: everything under BB's data dir, plus the ones this plugin
+ * created (`excludePaths`). Worktrees made by hand or by Orca, even inside
+ * the user's worktrees folder, are fair game.
+ */
+async function adoptableWorktrees(args: {
+  dataDir: string;
+  sourcePath: string;
+  excludePaths: readonly string[];
+  signal?: AbortSignal;
+}) {
+  const excluded = new Set(await Promise.all(args.excludePaths.map(canonical)));
+  const entries = selectAdoptableWorktrees({
+    entries: await listGitWorktrees(args),
+    managedRoot: resolveWorktreesRoot(args.dataDir),
+  });
+  const result = [];
+  for (const entry of entries) {
+    if (!entry.prunable && !excluded.has(await canonical(entry.path))) result.push(entry);
+  }
+  return result;
 }
 
 async function worktreePathsForPathKey(args: { dataDir: string; pathKey: string }): Promise<string[]> {
@@ -118,8 +131,9 @@ export default experimental_defineHostEntry({
     },
     async listWorktrees(input, context) {
       const worktrees = await adoptableWorktrees({
+        dataDir: context.experimental_paths.dataDir,
         sourcePath: input.sourcePath,
-        roots: managedRoots(context.experimental_paths.dataDir, input.sourcePath, input.worktreesRoot),
+        excludePaths: input.excludePaths,
       });
       return {
         worktrees: worktrees.map((entry) => ({
@@ -131,14 +145,17 @@ export default experimental_defineHostEntry({
       };
     },
     async resolveExistingWorktree(input, context) {
-      const roots = managedRoots(context.experimental_paths.dataDir, input.sourcePath, input.worktreesRoot);
       const resolved = await resolveAdoptableWorktree({
         sourcePath: input.sourcePath,
         path: input.path,
-        managedRoot: roots[0]!,
+        managedRoot: resolveWorktreesRoot(context.experimental_paths.dataDir),
       });
       if (resolved.status === "failed") return resolved;
-      const adoptable = await adoptableWorktrees({ sourcePath: input.sourcePath, roots });
+      const adoptable = await adoptableWorktrees({
+        dataDir: context.experimental_paths.dataDir,
+        sourcePath: input.sourcePath,
+        excludePaths: input.excludePaths,
+      });
       if (!adoptable.some((entry) => entry.path === resolved.path)) {
         return { status: "failed" as const, message: `${input.path} is managed by BB and can't be adopted.` };
       }
@@ -157,8 +174,12 @@ export default experimental_defineHostEntry({
       );
       let branchWorktree: { path: string; adoptable: boolean } | null = null;
       if (holder !== undefined) {
-        const roots = managedRoots(context.experimental_paths.dataDir, input.sourcePath, input.placement?.worktreesRoot ?? null);
-        const adoptable = await adoptableWorktrees({ sourcePath: input.sourcePath, roots, signal: context.signal });
+        const adoptable = await adoptableWorktrees({
+          dataDir: context.experimental_paths.dataDir,
+          sourcePath: input.sourcePath,
+          excludePaths: input.excludePaths,
+          signal: context.signal,
+        });
         branchWorktree = { path: holder.path, adoptable: adoptable.some((entry) => entry.path === holder.path) };
       }
       return { targetPath, targetExists, branchExists, validBranchName, branchWorktree };

@@ -29,6 +29,10 @@ export const worktreePlacementSchema = z
   .nullable();
 export type WorktreePlacement = z.infer<typeof worktreePlacementSchema>;
 
+// linear-issues: worktrees this plugin created. BB deletes those when their
+// environment retires, so they must never be adopted by another one.
+const excludePathsSchema = z.array(z.string().min(1)).max(2000);
+
 export const worktreeHostContract = defineRpcContract({
   // linear-issues: pre-flight for picking a branch/folder nobody uses yet.
   inspectTarget: {
@@ -38,6 +42,7 @@ export const worktreeHostContract = defineRpcContract({
         pathKey: z.string().min(1),
         branchName: z.string().min(1),
         placement: worktreePlacementSchema,
+        excludePaths: excludePathsSchema,
       })
       .strict(),
     output: z
@@ -56,8 +61,8 @@ export const worktreeHostContract = defineRpcContract({
     output: z.object({ branch: z.string().min(1).nullable() }).strict(),
   },
   listWorktrees: {
-    // linear-issues: + worktreesRoot, so worktrees this plugin manages aren't offered.
-    input: z.object({ sourcePath: z.string().min(1), worktreesRoot: z.string().min(1).nullable() }).strict(),
+    // linear-issues: + excludePaths, the worktrees this plugin created (never offered).
+    input: z.object({ sourcePath: z.string().min(1), excludePaths: excludePathsSchema }).strict(),
     output: z.object({ worktrees: z.array(discoveredWorktreeSchema) }).strict(),
   },
   resolveExistingWorktree: {
@@ -65,7 +70,7 @@ export const worktreeHostContract = defineRpcContract({
       .object({
         sourcePath: z.string().min(1),
         path: z.string().min(1),
-        worktreesRoot: z.string().min(1).nullable(),
+        excludePaths: excludePathsSchema,
       })
       .strict(),
     output: z.discriminatedUnion("status", [

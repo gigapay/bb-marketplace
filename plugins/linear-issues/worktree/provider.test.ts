@@ -4,8 +4,8 @@ import Database from "better-sqlite3";
 import { dirNameForBranch, registerLinearWorktree } from "./provider.ts";
 
 test("folder names use the last branch segment", () => {
-  assert.equal(dirNameForBranch("yoann/gig-12-fix-login"), "gig-12-fix-login");
-  assert.equal(dirNameForBranch("feature/Ünicode stuff!"), "nicode-stuff");
+  assert.equal(dirNameForBranch("yoann/gig-12-fix-login"), "yoann-gig-12-fix-login");
+  assert.equal(dirNameForBranch("feature/Ünicode stuff!"), "feature-nicode-stuff");
   assert.equal(dirNameForBranch("///"), "worktree");
 });
 
@@ -14,7 +14,7 @@ function setup(
 ) {
   const db = new Database(":memory:");
   db.exec(`CREATE TABLE worktree_reservations (path_key TEXT PRIMARY KEY, thread_id TEXT NOT NULL, branch TEXT NOT NULL,
-    source_path TEXT NOT NULL, placement TEXT, created_at INTEGER NOT NULL)`);
+    source_path TEXT NOT NULL, placement TEXT, created_at INTEGER NOT NULL, target_path TEXT)`);
   const created: { branchName: string; placement: unknown; branchMode: string }[] = [];
   const calls: string[] = [];
   const host = {
@@ -68,18 +68,18 @@ test("uses the Linear branch and a readable folder", async () => {
   const result = await provider.create(context("pk1", "GIG-12: Fix login"));
   assert.equal(result.status, "created");
   assert.equal(created[0]!.branchName, "yoann/gig-12-fix-login");
-  assert.deepEqual(created[0]!.placement, { worktreesRoot: "~/worktrees", dirName: "gig-12-fix-login" });
+  assert.deepEqual(created[0]!.placement, { worktreesRoot: "~/worktrees", dirName: "yoann-gig-12-fix-login" });
   assert.equal(created[0]!.branchMode, "reset");
 });
 
 test("'new' mode never reuses a branch or folder someone else has", async () => {
   const { provider, created, context } = setup({
     branches: ["yoann/gig-12-fix-login"],
-    folders: ["/wt/repo/gig-12-fix-login-2"],
+    folders: ["/wt/repo/yoann-gig-12-fix-login-2"],
   });
   await provider.create(context("pk1", "GIG-12: Fix login", { kind: "new", branch: { kind: "default" } }));
   assert.equal(created[0]!.branchName, "yoann/gig-12-fix-login-3");
-  assert.equal((created[0]!.placement as any).dirName, "gig-12-fix-login-3");
+  assert.equal((created[0]!.placement as any).dirName, "yoann-gig-12-fix-login-3");
 });
 
 test("two threads on one ticket get distinct names, retries keep theirs", async () => {
@@ -117,8 +117,8 @@ test("auto mode checks out an existing branch without resetting it", async () =>
 test("auto mode starts fresh when the branch lives in a BB-managed worktree", async () => {
   const { provider, created, context } = setup({
     branches: ["yoann/gig-12-fix-login"],
-    checkedOut: { "yoann/gig-12-fix-login": { path: "/wt/repo/gig-12-fix-login", adoptable: false } },
-    folders: ["/wt/repo/gig-12-fix-login"],
+    checkedOut: { "yoann/gig-12-fix-login": { path: "/wt/repo/yoann-gig-12-fix-login", adoptable: false } },
+    folders: ["/wt/repo/yoann-gig-12-fix-login"],
   });
   await provider.create(context("pk1", "GIG-12: Fix login"));
   assert.equal(created[0]!.branchName, "yoann/gig-12-fix-login-2");

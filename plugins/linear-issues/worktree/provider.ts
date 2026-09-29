@@ -63,11 +63,10 @@ export interface LinearWorktreeDeps {
   linearBranchFor(thread: { id: string; title: string | null; titleFallback: string | null }): Promise<string | null>;
 }
 
-/** Last path segment, made filesystem-safe: `yoann/gig-12-fix` → `gig-12-fix`. */
+/** The branch made filesystem-safe, like Orca: `yoann/gig-12-fix` → `yoann-gig-12-fix`. */
 export function dirNameForBranch(branch: string): string {
-  const leaf = branch.split("/").filter(Boolean).pop() ?? branch;
   return (
-    leaf
+    branch
       .replace(/[^A-Za-z0-9._-]+/g, "-")
       .replace(/^[._-]+|[._-]+$/g, "")
       .slice(0, 120)
@@ -108,9 +107,16 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
     `SELECT 1 FROM worktree_reservations WHERE source_path = ? AND placement = ? AND path_key != ?`,
   );
   const insertReservation = db.prepare(
-    `INSERT INTO worktree_reservations (path_key, thread_id, branch, source_path, placement, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO worktree_reservations (path_key, thread_id, branch, source_path, placement, created_at, target_path)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
+  const selectOwnTargets = db.prepare(
+    `SELECT target_path AS targetPath FROM worktree_reservations WHERE source_path = ? AND target_path IS NOT NULL`,
+  );
+  /** Folders this plugin created in a repo; BB deletes them on retirement. */
+  function ownTargets(sourcePath: string): string[] {
+    return (selectOwnTargets.all(sourcePath) as { targetPath: string }[]).map((row) => row.targetPath);
+  }
   const deleteReservation = db.prepare(`DELETE FROM worktree_reservations WHERE path_key = ?`);
 
   function readReservation(pathKey: string): Reservation | null {
@@ -158,7 +164,13 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
           if (placementJson !== null && dirReserved.get(args.sourcePath, placementJson, args.pathKey)) continue;
           const probe = await host.call(
             "inspectTarget",
-            { sourcePath: args.sourcePath, pathKey: args.pathKey, branchName: branch, placement },
+            {
+              sourcePath: args.sourcePath,
+              pathKey: args.pathKey,
+              branchName: branch,
+              placement,
+              excludePaths: ownTargets(args.sourcePath),
+            },
             { hostId: args.hostId, signal: args.signal },
           );
           if (!probe.validBranchName) break;
@@ -168,7 +180,15 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
           const folderTaken = placement !== null && probe.targetExists;
           const branchTaken = !args.fixedBranch && probe.branchExists;
           if (folderTaken || branchTaken) continue;
-          insertReservation.run(args.pathKey, args.threadId, branch, args.sourcePath, placementJson, Date.now());
+          insertReservation.run(
+            args.pathKey,
+            args.threadId,
+            branch,
+            args.sourcePath,
+            placementJson,
+            Date.now(),
+            probe.targetPath,
+          );
           return { branch, sourcePath: args.sourcePath, placement };
         }
       }
@@ -186,10 +206,9 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
     },
     path: string,
   ): Promise<PluginEnvironmentProviderCreateResult> {
-    const root = (await deps.worktreesRoot()).trim();
     const resolved = await host.call(
       "resolveExistingWorktree",
-      { sourcePath: context.projectCheckout.path, path, worktreesRoot: root === "" ? null : root },
+      { sourcePath: context.projectCheckout.path, path, excludePaths: ownTargets(context.projectCheckout.path) },
       { hostId: context.host.id, signal: context.signal, timeoutMs: CREATE_TIMEOUT_MS },
     );
     if (resolved.status === "failed") return { status: "failed", message: resolved.message };
@@ -200,10 +219,9 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
   }
 
   async function listExisting(args: { sourcePath: string; hostId: string }) {
-    const root = (await deps.worktreesRoot()).trim();
     return host.call(
       "listWorktrees",
-      { sourcePath: args.sourcePath, worktreesRoot: root === "" ? null : root },
+      { sourcePath: args.sourcePath, excludePaths: ownTargets(args.sourcePath) },
       { hostId: args.hostId },
     );
   }
@@ -232,6 +250,7 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
             pathKey: context.pathKey,
             branchName: reservation.branch,
             placement: reservation.placement,
+            excludePaths: [],
           },
           { hostId: context.host.id, signal: context.signal },
         );
@@ -290,7 +309,13 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
         if (linear !== null && !("kind" in inputs)) {
           const probe = await host.call(
             "inspectTarget",
-            { sourcePath: context.projectCheckout.path, pathKey: context.pathKey, branchName: linear, placement: null },
+            {
+              sourcePath: context.projectCheckout.path,
+              pathKey: context.pathKey,
+              branchName: linear,
+              placement: null,
+              excludePaths: ownTargets(context.projectCheckout.path),
+            },
             { hostId: context.host.id, signal: context.signal },
           );
           if (probe.branchWorktree?.adoptable) {
