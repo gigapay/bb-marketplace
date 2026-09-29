@@ -32,13 +32,13 @@ const PR_STATE_STYLE = {
   closed: { color: "#cf222e", label: "Closed" },
 } as const;
 
-export function prState(pr: PullRequest): keyof typeof PR_STATE_STYLE {
+export function prState(pr: Pick<PullRequest, "state" | "isDraft">): keyof typeof PR_STATE_STYLE {
   if (pr.state === "MERGED") return "merged";
   if (pr.state === "CLOSED") return "closed";
   return pr.isDraft ? "draft" : "open";
 }
 
-export function PrStateIcon({ pr }: { pr: PullRequest }) {
+export function PrStateIcon({ pr }: { pr: Pick<PullRequest, "state" | "isDraft"> }) {
   const kind = prState(pr);
   const style = PR_STATE_STYLE[kind];
   return (

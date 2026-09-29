@@ -1,21 +1,43 @@
-// bb-plugin-github-kit frontend: a GitHub page in the sidebar that lists your
-// pull requests. More GitHub views will hang off this page.
+// bb-plugin-github-kit frontend: a GitHub page in the sidebar and a "Pull
+// request" tab in each thread's side panel. The page's subPath carries the
+// open PR, so deep links and back/forward work: /plugins/github-kit/pulls/owner/repo/123.
 import { useEffect, useState } from "react";
-import { definePluginApp, useRpc } from "@get-bb/plugin-sdk/app";
+import { definePluginApp, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
+import type { PluginNavPanelProps } from "@get-bb/plugin-sdk/app";
 import { EmptyState, ErrorLine, errorText } from "./views/shared";
+import { PullRequestDetail } from "./views/PullRequestDetail";
 import { PullRequestList } from "./views/PullRequestList";
+import { THREAD_PANEL_ACTION_ID, ThreadPrPanel } from "./views/ThreadPrPanel";
+import { parsePrKey, prKey } from "./shared/pr-ref";
 import type { rpcContract } from "./server";
+
+const PANEL_PATH = "pulls";
 
 type Status = { configured: boolean; viewer: { login: string } | null; error: string | null };
 
-function GitHubPage() {
+function keyFromSubPath(subPath: string): string | null {
+  const [owner, name, number] = subPath.split("/").map((part) => decodeURIComponent(part));
+  if (!owner || !name || !number) return null;
+  const ref = parsePrKey(`${owner}/${name}#${number}`);
+  return ref === null ? null : prKey(ref);
+}
+
+function GitHubPage({ subPath }: PluginNavPanelProps) {
   const rpc = useRpc<typeof rpcContract>();
+  const navigate = useBbNavigate();
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     rpc.call("status").then(setStatus, (cause) => setError(errorText(cause)));
   }, [rpc]);
+
+  const openKey = keyFromSubPath(subPath);
+  const openPr = (key: string) => {
+    const ref = parsePrKey(key);
+    if (ref) navigate.toPluginPanel(PANEL_PATH, { subPath: `${ref.owner}/${ref.name}/${ref.number}` });
+  };
+  const backToList = () => navigate.toPluginPanel(PANEL_PATH, { subPath: "" });
 
   return (
     <div className="h-full min-h-0 flex-1 overflow-y-auto">
@@ -30,8 +52,10 @@ function GitHubPage() {
           </EmptyState>
         ) : status.viewer === null ? (
           <ErrorLine error={status.error ?? "Could not reach GitHub."} />
+        ) : openKey !== null ? (
+          <PullRequestDetail key={openKey} prKey={openKey} threadId={null} onBack={backToList} />
         ) : (
-          <PullRequestList viewer={status.viewer.login} />
+          <PullRequestList viewer={status.viewer.login} onOpen={openPr} />
         )}
       </div>
     </div>
@@ -43,7 +67,12 @@ export default definePluginApp((app) => {
     id: "github",
     title: "GitHub",
     icon: "github-kit/github",
-    path: "pulls",
+    path: PANEL_PATH,
     component: GitHubPage,
+  });
+  app.slots.threadPanelAction({
+    id: THREAD_PANEL_ACTION_ID,
+    title: "Pull request",
+    component: ThreadPrPanel,
   });
 });
