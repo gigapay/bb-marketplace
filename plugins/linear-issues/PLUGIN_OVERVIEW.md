@@ -10,7 +10,7 @@ You can also start from a ticket in BB's regular new-thread composer. Use the Li
 
 ## How linking works
 
-A thread is linked to an issue in three cases: it was started from the issue (from either composer), you linked it by hand, or its worktree branch contains the identifier (`yoann/gig-123-fix-login` links to `GIG-123`). Linked worktrees and threads get a Linear badge with the identifier in the sidebar. The thread header shows the linked issue, and you can link, change or unlink it from there. A manual choice always wins over the branch.
+A thread is linked to an issue in three cases: it was started from the issue (from either composer), you linked it by hand, its worktree branch contains the identifier, or it runs in a worktree that's already linked (`yoann/gig-123-fix-login` links to `GIG-123`). Linked worktrees and threads get a Linear icon in the sidebar. Hover it to see the ticket's title and status. The thread header shows the linked issue, and you can link, change or unlink it from there. A manual choice always wins over the branch.
 
 Agents get `bb linear-issues current`, `show`, `link` and `unlink`.
 

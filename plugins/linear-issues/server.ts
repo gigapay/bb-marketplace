@@ -5,7 +5,7 @@
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { hostContract } from "./contract.js";
-import { IDENTIFIER_PATTERN, LINKS_CHANGED, linkedIssueFromPrompt, resolveLink } from "./shared/links";
+import { IDENTIFIER_PATTERN, LINKS_CHANGED, linkedIssueFromPrompt, resolveLink, resolveThreadLinks } from "./shared/links";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 
@@ -422,20 +422,24 @@ export default async function plugin(bb: BbPluginApi) {
   /** The issue a thread points at, the same way the UI resolves it. */
   async function linkForThread(threadId: string) {
     const stored = selectLink.get(threadId) as StoredLink | undefined;
-    let branchName: string | null = null;
-    if (stored === undefined) {
-      const thread = await bb.sdk.threads.get({ threadId });
-      if (thread.environmentId) {
-        const environment = await bb.sdk.environments.get({ environmentId: thread.environmentId });
-        branchName = environment.branchName;
-      }
-    }
-    const keys = stored === undefined ? new Set(await teamKeys()) : new Set<string>();
-    return resolveLink(
-      stored && { identifier: stored.identifier, source: stored.source },
-      branchName,
-      keys,
+    if (stored !== undefined) return resolveLink(stored, null, new Set());
+    const thread = await bb.sdk.threads.get({ threadId });
+    if (!thread.environmentId) return null;
+    const environment = await bb.sdk.environments.get({ environmentId: thread.environmentId });
+    // Siblings in the same worktree, so a new thread inherits its ticket.
+    const siblings = await bb.sdk.threads.list({ environmentId: thread.environmentId, limit: 100 });
+    const siblingIds = new Set([threadId, ...siblings.map((sibling) => sibling.id)]);
+    const rows = new Map(
+      (selectLinks.all() as StoredLink[])
+        .filter((row) => siblingIds.has(row.threadId))
+        .map((row) => [row.threadId, row] as const),
     );
+    const links = resolveThreadLinks(
+      [...siblingIds].map((id) => ({ id, environmentId: environment.id, branchName: environment.branchName })),
+      rows,
+      new Set(await teamKeys()),
+    );
+    return links.get(threadId) ?? null;
   }
 
   // Links a thread when its first message carries the "Linked Linear issue:"

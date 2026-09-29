@@ -17,7 +17,7 @@ export function linkedIssueFromPrompt(text: string): string | null {
   return match ? match[1]!.toUpperCase() : null;
 }
 
-export type LinkSource = "spawn" | "manual" | "branch";
+export type LinkSource = "spawn" | "manual" | "branch" | "environment";
 
 /**
  * Finds the first `<team-key>-<number>` in a branch name whose key belongs to
@@ -47,4 +47,38 @@ export function resolveLink(
   }
   const fromBranch = issueIdentifierFromBranch(branchName, teamKeys);
   return fromBranch === null ? null : { identifier: fromBranch, source: "branch" };
+}
+
+type StoredRow = { identifier: string | null; source: "spawn" | "manual" };
+
+/**
+ * Resolves every thread at once so threads sharing a worktree can inherit its
+ * ticket: a thread with no link of its own takes the environment's issue when
+ * all linked threads there agree on one. An explicit unlink still wins.
+ */
+export function resolveThreadLinks(
+  threads: readonly { id: string; environmentId: string | null; branchName: string | null | undefined }[],
+  rows: ReadonlyMap<string, StoredRow>,
+  teamKeys: ReadonlySet<string>,
+): Map<string, { identifier: string; source: LinkSource }> {
+  const links = new Map<string, { identifier: string; source: LinkSource }>();
+  const byEnvironment = new Map<string, Set<string>>();
+  for (const thread of threads) {
+    const link = resolveLink(rows.get(thread.id), thread.branchName, teamKeys);
+    if (link === null) continue;
+    links.set(thread.id, link);
+    if (thread.environmentId !== null) {
+      const identifiers = byEnvironment.get(thread.environmentId) ?? new Set<string>();
+      identifiers.add(link.identifier);
+      byEnvironment.set(thread.environmentId, identifiers);
+    }
+  }
+  for (const thread of threads) {
+    if (links.has(thread.id) || rows.has(thread.id) || thread.environmentId === null) continue;
+    const identifiers = byEnvironment.get(thread.environmentId);
+    if (identifiers?.size === 1) {
+      links.set(thread.id, { identifier: [...identifiers][0]!, source: "environment" });
+    }
+  }
+  return links;
 }

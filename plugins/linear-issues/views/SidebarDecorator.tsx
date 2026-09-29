@@ -1,36 +1,29 @@
-import { useEffect } from "react";
-import { useIssueLinks } from "./links";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { useBbNavigate, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { Icon } from "@/components/ui/icon";
+import type { IssueSummary, rpcContract } from "../server";
+import { LINKS_CHANGED } from "../shared/links";
+import { SOURCE_LABELS, useIssueLinks } from "./links";
+import { PriorityIcon, StateIcon } from "./shared";
+import type { LinkSource } from "../shared/links";
 
 // The sidebar belongs to BB's thread-list plugin, which has no extension point
-// for rows. We only set a data attribute on its nodes and draw the badge with
-// CSS, so React never sees a foreign child. If BB changes its markup the badge
-// just disappears; nothing breaks.
-const ATTRIBUTE = "data-linear-issue";
-const STYLE_ID = "linear-issues-sidebar-badges";
+// for rows. We portal a small badge into its row nodes. React tolerates extra
+// trailing children, and if BB changes its markup the badge just stops
+// showing. The wrapper carries the plugin scope so our Tailwind classes apply.
+const MARKER = "data-linear-issues-badge";
 
-const LINEAR_MARK =
-  "data:image/svg+xml," +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#5E6AD2"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg>',
-  );
-
-const CSS_RULES = `
-[${ATTRIBUTE}]::after {
-  content: attr(${ATTRIBUTE});
-  flex-shrink: 0;
-  margin-left: 6px;
-  padding-left: 15px;
-  background: url("${LINEAR_MARK}") no-repeat left center / 11px 11px;
-  font: 500 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--muted-foreground, currentColor);
-  white-space: nowrap;
-}`;
+type Target = { element: Element; identifier: string; source: LinkSource };
 
 function environmentHeaderLabels(name: string): Element[] {
   const quoted = CSS.escape(name);
-  return [...document.querySelectorAll(
-    `button[aria-label="Collapse ${quoted} threads"], button[aria-label="Expand ${quoted} threads"]`,
-  )].flatMap((chevron) => (chevron.parentElement ? [chevron.parentElement] : []));
+  return [
+    ...document.querySelectorAll(
+      `button[aria-label="Collapse ${quoted} threads"], button[aria-label="Expand ${quoted} threads"]`,
+    ),
+  ].flatMap((chevron) => (chevron.parentElement ? [chevron.parentElement] : []));
 }
 
 function threadTitleContainer(threadId: string): Element | null {
@@ -38,22 +31,20 @@ function threadTitleContainer(threadId: string): Element | null {
   return anchor?.nextElementSibling ?? null;
 }
 
-/** App-wide, renders nothing: keeps Linear badges on the sidebar rows. */
+function sameTargets(a: Target[], b: Target[]): boolean {
+  return a.length === b.length && a.every((t, i) => t.element === b[i]!.element && t.identifier === b[i]!.identifier);
+}
+
+/** App-wide, renders only portals: keeps a Linear badge on sidebar rows. */
 export function SidebarDecorator() {
+  const rpc = useRpc<typeof rpcContract>();
   const links = useIssueLinks();
+  const [targets, setTargets] = useState<Target[]>([]);
+  const [issues, setIssues] = useState<ReadonlyMap<string, IssueSummary>>(new Map());
 
   useEffect(() => {
-    if (document.getElementById(STYLE_ID)) return;
-    const style = document.createElement("style");
-    style.id = STYLE_ID;
-    style.textContent = CSS_RULES;
-    document.head.append(style);
-    return () => style.remove();
-  }, []);
-
-  useEffect(() => {
-    // One badge per worktree when every linked thread in it agrees; threads
-    // outside a worktree (or whose group isn't rendered) get their own.
+    // One badge per worktree when every thread in it agrees; threads outside a
+    // worktree (or whose group isn't rendered) get their own.
     const environments = new Map<string, { label: string; identifiers: Set<string>; threadIds: string[] }>();
     const loose = new Map<string, string>();
     for (const thread of links.threads) {
@@ -71,45 +62,136 @@ export function SidebarDecorator() {
       }
     }
 
-    const apply = () => {
-      const wanted = new Map<Element, string>();
+    const compute = (): Target[] => {
+      const found: Target[] = [];
       const threadBadges = new Map(loose);
       for (const entry of environments.values()) {
         const headers = entry.identifiers.size === 1 ? environmentHeaderLabels(entry.label) : [];
         if (headers.length > 0) {
           const [identifier] = entry.identifiers;
-          for (const header of headers) wanted.set(header, identifier!);
+          const source = links.byThread.get(entry.threadIds[0]!)!.source;
+          for (const element of headers) found.push({ element, identifier: identifier!, source });
         } else {
-          for (const threadId of entry.threadIds) threadBadges.set(threadId, links.byThread.get(threadId)!.identifier);
+          for (const id of entry.threadIds) threadBadges.set(id, links.byThread.get(id)!.identifier);
         }
       }
       for (const [threadId, identifier] of threadBadges) {
-        const container = threadTitleContainer(threadId);
-        if (container) wanted.set(container, identifier);
+        const element = threadTitleContainer(threadId);
+        if (element) found.push({ element, identifier, source: links.byThread.get(threadId)!.source });
       }
-      for (const element of document.querySelectorAll(`[${ATTRIBUTE}]`)) {
-        if (!wanted.has(element)) element.removeAttribute(ATTRIBUTE);
-      }
-      for (const [element, identifier] of wanted) {
-        if (element.getAttribute(ATTRIBUTE) !== identifier) element.setAttribute(ATTRIBUTE, identifier);
-      }
+      return found;
     };
 
     let frame = 0;
-    const schedule = () => {
-      if (frame === 0) frame = requestAnimationFrame(() => ((frame = 0), apply()));
+    const apply = () => {
+      frame = 0;
+      const next = compute();
+      setTargets((current) => (sameTargets(current, next) ? current : next));
     };
     apply();
-    // Rows mount and unmount as the list virtualizes or regroups. Attribute
-    // writes don't trigger childList mutations, so this can't loop.
-    const observer = new MutationObserver(schedule);
+    // Rows mount and unmount as the list virtualizes or regroups. Our own
+    // badge insertions re-trigger this once, then compute() is stable.
+    const observer = new MutationObserver(() => {
+      if (frame === 0) frame = requestAnimationFrame(apply);
+    });
     observer.observe(document.body, { childList: true, subtree: true });
     return () => {
       observer.disconnect();
       cancelAnimationFrame(frame);
-      for (const element of document.querySelectorAll(`[${ATTRIBUTE}]`)) element.removeAttribute(ATTRIBUTE);
     };
   }, [links.threads, links.byThread]);
 
-  return null;
+  // Popover data for every badged issue, in one request.
+  const identifiersKey = useMemo(
+    () => [...new Set(targets.map((target) => target.identifier))].sort().join(","),
+    [targets],
+  );
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  useRealtime(LINKS_CHANGED, () => setRefreshNonce((n) => n + 1));
+  useEffect(() => {
+    if (identifiersKey === "") return;
+    let cancelled = false;
+    rpc.call("issues_by_identifiers", { identifiers: identifiersKey.split(",").slice(0, 100) }).then(
+      (result) => !cancelled && setIssues(new Map(result.issues.map((issue) => [issue.identifier, issue]))),
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [rpc, identifiersKey, refreshNonce]);
+
+  return (
+    <>
+      {targets.map((target) =>
+        createPortal(
+          <SidebarBadge identifier={target.identifier} source={target.source} issue={issues.get(target.identifier)} />,
+          target.element,
+          `${target.identifier}:${targets.indexOf(target)}`,
+        ),
+      )}
+    </>
+  );
+}
+
+function SidebarBadge({
+  identifier,
+  source,
+  issue,
+}: {
+  identifier: string;
+  source: LinkSource;
+  issue: IssueSummary | undefined;
+}) {
+  const navigate = useBbNavigate();
+  return (
+    <span
+      data-bb-plugin-root=""
+      data-bb-plugin="linear-issues"
+      {...{ [MARKER]: "" }}
+      className="pointer-events-auto relative z-[31] ml-1.5 inline-flex shrink-0 items-center"
+    >
+      <HoverCard openDelay={250} closeDelay={100}>
+        <HoverCardTrigger asChild>
+          <button
+            type="button"
+            aria-label={issue ? `${identifier}: ${issue.title}` : `Linear issue ${identifier}`}
+            className="inline-flex size-4 items-center justify-center rounded-sm text-[#5E6AD2] hover:bg-accent"
+            onClick={(event) => {
+              // The row's own link sits underneath; this click is ours.
+              event.preventDefault();
+              event.stopPropagation();
+              navigate.toPluginPanel("issues", { subPath: identifier });
+            }}
+          >
+            <Icon name="linear-issues/linear" className="size-3.5" />
+          </button>
+        </HoverCardTrigger>
+        <HoverCardContent side="right" align="start" className="w-72 p-3">
+          <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
+            <Icon name="linear-issues/linear" className="size-3 text-[#5E6AD2]" />
+            {identifier}
+          </p>
+          {issue ? (
+            <>
+              <p className="mt-1 text-sm font-medium leading-snug">{issue.title}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5">
+                  <StateIcon state={issue.state} />
+                  {issue.state.name}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <PriorityIcon priority={issue.priority} label={issue.priorityLabel} />
+                  {issue.priorityLabel}
+                </span>
+                {issue.assignee ? <span>{issue.assignee.name}</span> : null}
+              </div>
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-muted-foreground">Loading…</p>
+          )}
+          <p className="mt-2 text-[11px] text-muted-foreground">{SOURCE_LABELS[source]}</p>
+        </HoverCardContent>
+      </HoverCard>
+    </span>
+  );
 }

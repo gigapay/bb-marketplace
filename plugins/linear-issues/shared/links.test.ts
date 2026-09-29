@@ -62,3 +62,31 @@ test("the seeded prompt starts with the identifier and carries the marker first"
   assert.ok(prompt.startsWith("GIG-7: Fix login\n\nmy notes\n\n"));
   assert.equal(linkedIssueFromPrompt(prompt), "GIG-7");
 });
+
+test("threads in a linked worktree inherit its issue, unless explicitly unlinked", async () => {
+  const { resolveThreadLinks } = await import("./links.ts");
+  const threads = [
+    { id: "a", environmentId: "env1", branchName: "bb/some-work-thr_a" },
+    { id: "b", environmentId: "env1", branchName: "bb/some-work-thr_a" },
+    { id: "c", environmentId: "env1", branchName: "bb/some-work-thr_a" },
+    { id: "d", environmentId: "env2", branchName: "main" },
+  ];
+  const rows = new Map([
+    ["a", { identifier: "GIG-9", source: "spawn" as const }],
+    ["c", { identifier: null, source: "manual" as const }],
+  ]);
+  const links = resolveThreadLinks(threads, rows, teams);
+  assert.deepEqual(links.get("b"), { identifier: "GIG-9", source: "environment" });
+  assert.equal(links.get("c"), undefined);
+  assert.equal(links.get("d"), undefined);
+});
+
+test("no inheritance when a worktree holds two different issues", async () => {
+  const { resolveThreadLinks } = await import("./links.ts");
+  const threads = ["a", "b", "c"].map((id) => ({ id, environmentId: "env1", branchName: null }));
+  const rows = new Map([
+    ["a", { identifier: "GIG-1", source: "manual" as const }],
+    ["b", { identifier: "GIG-2", source: "manual" as const }],
+  ]);
+  assert.equal(resolveThreadLinks(threads, rows, teams).get("c"), undefined);
+});

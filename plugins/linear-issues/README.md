@@ -20,11 +20,11 @@ The prompt carries a `Linked Linear issue: GIG-123` line. A `message.dispatch` h
 
 ## Sidebar badges
 
-BB's sidebar belongs to its bundled thread-list plugin, which has no extension point for rows. An app-wide overlay (`views/SidebarDecorator.tsx`) sets a `data-linear-issue` attribute on the worktree row, or on the thread row when there's no worktree group, and CSS draws the Linear mark and identifier after the name. Worktree rows are found through their "Collapse/Expand <name> threads" chevron. If BB changes that markup the badge disappears, and nothing else breaks.
+BB's sidebar belongs to its bundled thread-list plugin, which has no extension point for rows. An app-wide overlay (`views/SidebarDecorator.tsx`) portals a small Linear icon into the worktree row, or into the thread row when there's no worktree group. Hovering it opens a hover card with the ticket's title, status, priority and assignee, and clicking it opens the issue. The badge wrapper carries `data-bb-plugin="linear-issues"` so the plugin's scoped CSS applies inside the sidebar. Worktree rows are found through their "Collapse/Expand <name> threads" chevron. If BB changes that markup the badge stops showing, and nothing else breaks.
 
 ## Thread links
 
-A thread is linked to an issue when it was started from a ticket (issue page or composer button), when you link it by hand (from the thread header, the issue page, or `bb linear-issues link <id>`), or when its worktree branch contains the identifier. Stored links live in the plugin's SQLite database. A stored row overrides the branch match, and a stored "unlinked" row hides one. Branch matches are computed on read from `environment.branchName`, and only keys of real Linear teams count.
+A thread is linked to an issue when it was started from a ticket (issue page or composer button), when you link it by hand (from the thread header, the issue page, or `bb linear-issues link <id>`), when its worktree branch contains the identifier, or when it shares a worktree whose linked threads all point at one issue. Stored links live in the plugin's SQLite database. A stored row overrides the branch match, and a stored "unlinked" row hides one. Branch matches are computed on read from `environment.branchName`, and only keys of real Linear teams count.
 
 ## What's in it
 

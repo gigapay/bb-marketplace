@@ -6,7 +6,7 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import type { PluginSidebarThread } from "@get-bb/plugin-sdk/app";
 import type { StoredLink, rpcContract } from "../server";
-import { LINKS_CHANGED, resolveLink, type LinkSource } from "../shared/links";
+import { LINKS_CHANGED, resolveThreadLinks, type LinkSource } from "../shared/links";
 
 export type LinkedThread = { thread: PluginSidebarThread; source: LinkSource };
 
@@ -30,13 +30,20 @@ export function useIssueLinks() {
   const resolved = useMemo(() => {
     const rows = new Map((stored?.links ?? []).map((link) => [link.threadId, link]));
     const teamKeys = new Set(stored?.teamKeys ?? []);
-    const byThread = new Map<string, { identifier: string; source: LinkSource }>();
+    const visible = threads.filter((thread) => !thread.isHidden);
+    const byThread = resolveThreadLinks(
+      visible.map((thread) => ({
+        id: thread.id,
+        environmentId: thread.environment?.id ?? null,
+        branchName: thread.environment?.branchName,
+      })),
+      rows,
+      teamKeys,
+    );
     const byIssue = new Map<string, LinkedThread[]>();
-    for (const thread of threads) {
-      if (thread.isHidden) continue;
-      const link = resolveLink(rows.get(thread.id), thread.environment?.branchName, teamKeys);
-      if (link === null) continue;
-      byThread.set(thread.id, link);
+    for (const thread of visible) {
+      const link = byThread.get(thread.id);
+      if (link === undefined) continue;
       const list = byIssue.get(link.identifier) ?? [];
       list.push({ thread, source: link.source });
       byIssue.set(link.identifier, list);
@@ -64,4 +71,5 @@ export const SOURCE_LABELS: Record<LinkSource, string> = {
   spawn: "Started from issue",
   manual: "Linked manually",
   branch: "Matched from branch",
+  environment: "Shares a linked worktree",
 };
