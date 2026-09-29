@@ -66,16 +66,25 @@ describe.skipIf(!existsSync(lifecycleSource))("the installed pi-toolbox lifecycl
     const publisher = new module.LifecyclePublisher("session-a", "source-a", (event) =>
       events.push(JSON.parse(JSON.stringify(event))),
     );
-    const state = (status: string, settledAt?: number) => ({
+    const state = (status: string, settledAt?: number, effectiveModel?: string) => ({
       version: 1,
       nextSerial: 2,
       nextSettlementSeq: 1,
-      runs: [record({ status, settledAt })],
+      runs: [
+        record({
+          status,
+          settledAt,
+          agentProfile: "designer",
+          requestedModel: "openai-codex/gpt-5.6-luna",
+          effectiveModel,
+          thinkingLevel: "high",
+        }),
+      ],
     });
     publisher.update(state("queued"));
-    publisher.update(state("running"));
+    publisher.update(state("running", undefined, "openai-codex/gpt-5.6-sol"));
     publisher.snapshot();
-    publisher.update(state("completed", 20));
+    publisher.update(state("completed", 20, "openai-codex/gpt-5.6-sol"));
     publisher.clear();
 
     const serialized = JSON.stringify(events);
@@ -109,6 +118,14 @@ describe.skipIf(!existsSync(lifecycleSource))("the installed pi-toolbox lifecycl
       ["item/backgroundTask/progress", "running"],
       ["item/backgroundTask/completed", "completed"],
     ]);
-    expect((tasks[0] as { item: { description: string } }).item.description).toBe("reviewer");
+    const descriptions = tasks.map((event) => (event as { item: { description: string } }).item.description);
+    // Display metadata arrived with pi-toolbox 7096f02; older publishers send the label alone.
+    const withMetadata = parsed.some((event) => event?.kind === "upsert" && event.run.agent !== undefined);
+    expect(descriptions.at(-1)).toBe(
+      withMetadata ? "reviewer (designer) · openai-codex/gpt-5.6-sol · high" : "reviewer",
+    );
+    if (withMetadata) {
+      expect(descriptions[0]).toBe("reviewer (designer) · openai-codex/gpt-5.6-luna · high");
+    }
   });
 });
