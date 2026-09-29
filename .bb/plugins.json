@@ -4,6 +4,7 @@
   "name": "yteruel31-bb-plugins",
   "plugins": [
     { "name": "linear-issues", "source": "./plugins/linear-issues" },
-    { "name": "usage-bar", "source": "./plugins/usage-bar" }
+    { "name": "usage-bar", "source": "./plugins/usage-bar" },
+    { "name": "github-kit", "source": "./plugins/github-kit" }
   ]
 }

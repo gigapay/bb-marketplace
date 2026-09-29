@@ -50,6 +50,29 @@
           "tagPrefix": "usage-bar/"
         }
       }
+    },
+    {
+      "id": "github-kit",
+      "displayName": "GitHub Kit",
+      "description": "Your GitHub pull requests in BB: review requests, your own PRs, CI and review status.",
+      "icon": "GitPullRequest",
+      "tags": [
+        "github",
+        "pull-requests",
+        "productivity"
+      ],
+      "author": {
+        "name": "Yoann Teruel",
+        "github": "yteruel31"
+      },
+      "source": {
+        "git": {
+          "url": "https://github.com/yteruel31/bb-marketplace.git",
+          "subdir": "plugins/github-kit",
+          "range": ">=0.1.0 <1.0.0",
+          "tagPrefix": "github-kit/"
+        }
+      }
     }
   ]
 }
