@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import type { IssueSummary } from "../server";
 
@@ -34,24 +33,40 @@ export function StateIcon({ state, className }: { state: IssueState; className?:
   );
 }
 
-const PRIORITY_ICONS: Record<number, string> = {
-  1: "AlertOctagon",
-  2: "SignalHigh",
-  3: "SignalMedium",
-  4: "SignalLow",
-};
-
+/** Linear's priority glyphs: signal bars, an alert square for urgent, a dash for none. */
 export function PriorityIcon({ priority, label }: { priority: number; label: string }) {
-  const name = PRIORITY_ICONS[priority];
-  if (name === undefined) {
-    return <span aria-label={label} className="inline-block w-4 text-center text-muted-foreground">–</span>;
+  if (priority === 1) {
+    return (
+      <svg role="img" aria-label={label} viewBox="0 0 16 16" className="size-4 shrink-0 text-destructive">
+        <rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="currentColor" />
+        <path d="M8 4.5v4.5M8 11.2v.3" stroke="var(--background, #fff)" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
   }
+  if (priority < 2 || priority > 4) {
+    return (
+      <svg role="img" aria-label={label} viewBox="0 0 16 16" className="size-4 shrink-0 text-muted-foreground">
+        <path d="M3 8h2M7 8h2M11 8h2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  // High lights three bars, medium two, low one.
+  const lit = 5 - priority;
   return (
-    <Icon
-      name={name}
-      aria-label={label}
-      className={cn("size-4 shrink-0", priority === 1 ? "text-destructive" : "text-muted-foreground")}
-    />
+    <svg role="img" aria-label={label} viewBox="0 0 16 16" className="size-4 shrink-0 text-muted-foreground">
+      {[0, 1, 2].map((bar) => (
+        <rect
+          key={bar}
+          x={2 + bar * 4.5}
+          y={10 - bar * 3.5}
+          width="3"
+          height={4 + bar * 3.5}
+          rx="1"
+          fill="currentColor"
+          opacity={bar < lit ? 1 : 0.3}
+        />
+      ))}
+    </svg>
   );
 }
 

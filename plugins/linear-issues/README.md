@@ -48,7 +48,8 @@ A thread is linked to an issue when it was started from a ticket (issue page or 
 - `app.tsx` is the page entry. The route `/plugins/linear-issues/issues/<IDENTIFIER>` opens an issue directly.
 - `views/IssueList.tsx` shows the list. It has Assigned, Created, Subscribed and With threads scopes, search, a "show done" toggle, and a thread count per issue. Issues are grouped by workflow state and sorted by priority.
 - `views/IssueDetail.tsx` shows one issue: its metadata, description, sub-issues and comments, its linked threads, and BB's new-thread composer seeded with the ticket and the last project used for that team.
-- `views/ThreadHeaderLink.tsx` is the chip in the thread header that shows, links, changes or unlinks the issue.
+- `views/ThreadHeaderLink.tsx` is the chip in the thread header. Clicking a linked chip opens the "Linear issue" side-panel tab, and an unlinked one offers to link.
+- `views/ThreadLinearPanel.tsx` is that tab (`app.slots.threadPanelAction`). BB always lists it in the panel's new-tab launcher, so it follows the thread's link live. It shows the ticket (status, priority, branch, description, sub-issues, comments) with Change and Unlink when the thread is linked, and a picker when it isn't.
 - `views/links.tsx` resolves every thread's link from stored rows plus branch names (`shared/links.ts`, covered by `npm test`).
 - `worktree/provider.ts` is the Linear worktree provider. `worktree/host` and `worktree/vendor` are the host-side git code copied from BB, and `host.ts` and `contract.ts` merge it with the branch rename into the plugin's single host entry.
 - `assets/linear.svg` is the Linear mark. It's the plugin icon, and `linear-issues/linear` everywhere in the UI.

@@ -163,7 +163,7 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
           Show done
         </label>
         <Button variant="ghost" size="icon" aria-label="Refresh" onClick={load} disabled={loading}>
-          <Icon name="RefreshCw" className={cn("size-4", loading && "animate-spin")} />
+          <Icon name="ArrowReloadHorizontal" className={cn("size-4", loading && "animate-spin")} />
         </Button>
       </div>
 
@@ -258,7 +258,7 @@ function IssueRow({
             aria-label={`${threadCount} linked ${threadCount === 1 ? "thread" : "threads"}`}
             className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent px-1.5 py-0.5 text-xs text-accent-foreground"
           >
-            <Icon name="MessagesSquare" className="size-3" />
+            <Icon name="MessageSquare" className="size-3" />
             {threadCount}
           </span>
         ) : null}

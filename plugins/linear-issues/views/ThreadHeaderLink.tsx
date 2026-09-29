@@ -15,6 +15,7 @@ import { issueIdentifierFromBranch } from "../shared/links";
 import type { IssueSummary, rpcContract } from "../server";
 import { SOURCE_LABELS, useIssueLinks } from "./links";
 import { IssuePickerDialog } from "./pickers";
+import { THREAD_PANEL_ACTION_ID } from "./ThreadLinearPanel";
 import { errorText } from "./shared";
 
 export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHeaderActionProps) {
@@ -84,7 +85,12 @@ export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHe
         size="sm"
         className="h-7 gap-1.5 px-2"
         aria-label={`Linear issue ${link.identifier}`}
-        onClick={() => setMenuOpen(true)}
+        onClick={() => {
+          // The side-panel tab holds the ticket and its actions; the dialog
+          // only covers surfaces without a thread side panel.
+          const opened = navigate.openThreadPanel({ actionId: THREAD_PANEL_ACTION_ID, title: link.identifier });
+          if (!opened) setMenuOpen(true);
+        }}
       >
         <Icon name="linear-issues/linear" className="size-3.5 text-[#5E6AD2]" />
         <span className="font-mono text-xs">{link.identifier}</span>
@@ -123,7 +129,7 @@ export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHe
                 setPickerOpen(true);
               }}
             >
-              <Icon name="Replace" className="size-4" />
+              <Icon name="Search" className="size-4" />
               Change
             </Button>
             <Button
@@ -134,7 +140,7 @@ export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHe
                 run(rpc.call("link_set", { threadId, identifier: null }), "Unlinked");
               }}
             >
-              <Icon name="Unlink" className="size-4" />
+              <Icon name="X" className="size-4" />
               Unlink
             </Button>
             {hasStoredRow && branchMatch !== null && branchMatch !== link.identifier ? (

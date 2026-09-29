@@ -8,6 +8,7 @@ import { EmptyState, ErrorLine, errorText } from "./views/shared";
 import { IssueDetail } from "./views/IssueDetail";
 import { IssueList } from "./views/IssueList";
 import { ThreadHeaderLink } from "./views/ThreadHeaderLink";
+import { THREAD_PANEL_ACTION_ID, ThreadLinearPanel } from "./views/ThreadLinearPanel";
 import { ComposerIssuePicker, requestIssuePicker } from "./views/ComposerIssuePicker";
 import { SidebarDecorator } from "./views/SidebarDecorator";
 import { WorktreeInputs } from "./views/WorktreeInputs";
@@ -62,6 +63,11 @@ export default definePluginApp((app) => {
     icon: LINEAR_ICON,
     path: PANEL_PATH,
     component: LinearPage,
+  });
+  app.slots.threadPanelAction({
+    id: THREAD_PANEL_ACTION_ID,
+    title: "Linear issue",
+    component: ThreadLinearPanel,
   });
   app.slots.experimental_threadHeaderAction({
     id: "linked-issue",

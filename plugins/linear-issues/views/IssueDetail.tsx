@@ -183,7 +183,7 @@ function IssueBody({ issue }: { issue: Issue }) {
             className="ml-auto h-7 text-muted-foreground"
             onClick={() => setThreadPickerOpen(true)}
           >
-            <Icon name="Link" className="size-4" />
+            <Icon name="Plus" className="size-4" />
             Link a thread
           </Button>
         </div>
@@ -360,7 +360,7 @@ function LinkedThreadRow({
         aria-label={`Unlink ${thread.displayTitle}`}
         onClick={onUnlink}
       >
-        <Icon name="Unlink" className="size-4" />
+        <Icon name="X" className="size-4" />
       </Button>
     </li>
   );

@@ -14,7 +14,7 @@ The plugin adds a "Linear worktree" environment. It branches off the project's p
 
 ## How linking works
 
-A thread is linked to an issue in three cases: it was started from the issue (from either composer), you linked it by hand, its worktree branch contains the identifier, or it runs in a worktree that's already linked (`yoann/gig-123-fix-login` links to `GIG-123`). Linked worktrees and threads get a Linear icon in the sidebar. Hover it to see the ticket's title and status. The thread header shows the linked issue, and you can link, change or unlink it from there. A manual choice always wins over the branch.
+A thread is linked to an issue in three cases: it was started from the issue (from either composer), you linked it by hand, its worktree branch contains the identifier, or it runs in a worktree that's already linked (`yoann/gig-123-fix-login` links to `GIG-123`). Linked worktrees and threads get a Linear icon in the sidebar. Hover it to see the ticket's title and status. The thread header shows the linked issue. Click it to open a "Linear issue" tab in the thread's side panel, with the ticket's status, description and comments, and buttons to change or unlink it. A manual choice always wins over the branch.
 
 Agents get `bb linear-issues current`, `show`, `link` and `unlink`.
 
