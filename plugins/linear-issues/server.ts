@@ -4,7 +4,7 @@
 // this backend. app.tsx talks to it over the RPC contract below.
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { IDENTIFIER_PATTERN, LINKS_CHANGED, resolveLink } from "./shared/links";
+import { IDENTIFIER_PATTERN, LINKS_CHANGED, linkedIssueFromPrompt, resolveLink } from "./shared/links";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 
@@ -360,6 +360,25 @@ export default async function plugin(bb: BbPluginApi) {
       keys,
     );
   }
+
+  // Links a thread when its first message carries the "Linked Linear issue:"
+  // line the plugin seeds, so it works from BB's own composer too. It must
+  // never block a send: any failure just proceeds without a link.
+  bb.experimental_hooks.on("message.dispatch", (context) => {
+    try {
+      if (context.attempt !== "start-turn" || selectLink.get(context.thread.id) !== undefined) {
+        return { action: "proceed" };
+      }
+      const identifier = linkedIssueFromPrompt(context.input.text);
+      if (identifier === null) return { action: "proceed" };
+      storeLink(context.thread.id, identifier, "spawn");
+      const teamKey = identifier.split("-")[0]!;
+      void bb.storage.kv.set(`teamProject:${teamKey}`, context.project.id).catch(() => undefined);
+    } catch (cause) {
+      bb.log.warn(`linking on dispatch failed: ${errorMessage(cause)}`);
+    }
+    return { action: "proceed" };
+  });
 
   bb.rpc.register(rpcContract, {
     status: async () => {

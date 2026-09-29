@@ -6,9 +6,11 @@ The Linear page lists the issues assigned to you, created by you, or that you're
 
 Open an issue to read its description, sub-issues and comments, and to see the threads linked to it. From there you can start a new thread. The composer is prefilled with the ticket and preselects the last project you used for that Linear team.
 
+You can also start from a ticket in BB's regular new-thread composer. Use the Linear button next to the send button, or "Start from a Linear issue" in the `+` menu. Picking a ticket fills the prompt and switches to a worktree based on the project's primary branch. The branch is named after the ticket, like `yoann/gig-123-fix-login-…`.
+
 ## How linking works
 
-A thread is linked to an issue in three cases: it was started from the issue, you linked it by hand, or its worktree branch contains the identifier (`yoann/gig-123-fix-login` links to `GIG-123`). The thread header shows the linked issue, and you can link, change or unlink it from there. A manual choice always wins over the branch.
+A thread is linked to an issue in three cases: it was started from the issue (from either composer), you linked it by hand, or its worktree branch contains the identifier (`yoann/gig-123-fix-login` links to `GIG-123`). The thread header shows the linked issue, and you can link, change or unlink it from there. A manual choice always wins over the branch.
 
 Agents get `bb linear-issues current`, `show`, `link` and `unlink`.
 

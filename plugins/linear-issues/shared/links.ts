@@ -6,6 +6,17 @@ export const LINKS_CHANGED = "links-changed";
 
 export const IDENTIFIER_PATTERN = /^[A-Z][A-Z0-9]{0,9}-\d{1,7}$/;
 
+/**
+ * Line the seeded prompt carries so the server's dispatch hook can link the
+ * new thread, whichever composer sent it. Same wording Orca uses.
+ */
+export const LINKED_ISSUE_PREFIX = "Linked Linear issue: ";
+
+export function linkedIssueFromPrompt(text: string): string | null {
+  const match = /^Linked Linear issue: ([A-Za-z][A-Za-z0-9]{0,9}-\d{1,7})\s*$/m.exec(text);
+  return match ? match[1]!.toUpperCase() : null;
+}
+
 export type LinkSource = "spawn" | "manual" | "branch";
 
 /**

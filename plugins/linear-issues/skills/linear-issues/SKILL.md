@@ -19,7 +19,7 @@ Add `--json` to `list`, `show`, and `current` when the output drives code.
 
 ## How threads get linked
 
-A thread is linked when it was started from the issue page, when someone linked it by hand, or when its worktree branch contains the issue identifier (`yoann/gig-123-fix-login` links to `GIG-123`). A manual link or unlink always wins over the branch.
+A thread is linked when it was started from a ticket (its prompt then has a `Linked Linear issue: <id>` line), when someone linked it by hand, or when its worktree branch contains the issue identifier (`yoann/gig-123-fix-login` links to `GIG-123`). A manual link or unlink always wins over the branch.
 
 ## Procedure
 

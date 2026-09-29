@@ -8,6 +8,7 @@ import { EmptyState, ErrorLine, errorText } from "./views/shared";
 import { IssueDetail } from "./views/IssueDetail";
 import { IssueList } from "./views/IssueList";
 import { ThreadHeaderLink } from "./views/ThreadHeaderLink";
+import { ComposerIssuePicker, requestIssuePicker } from "./views/ComposerIssuePicker";
 import type { rpcContract } from "./server";
 import { IDENTIFIER_PATTERN } from "./shared/links";
 
@@ -63,5 +64,18 @@ export default definePluginApp((app) => {
     id: "linked-issue",
     title: "Linear issue",
     component: ThreadHeaderLink,
+  });
+  app.composer.customize({
+    id: "linear-issue",
+    scopes: ["new-thread"],
+    actions: [{ id: "pick-issue", component: ComposerIssuePicker }],
+    plusMenu: [
+      {
+        id: "pick-issue",
+        label: "Start from a Linear issue",
+        description: "Fill the prompt from a ticket and work in its own worktree",
+        run: () => requestIssuePicker(),
+      },
+    ],
   });
 });
