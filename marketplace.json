@@ -1,0 +1,25 @@
+{
+  "$schema": "https://getbb.app/schemas/marketplace.schema.json",
+  "schemaVersion": 1,
+  "name": "yteruel31",
+  "displayName": "Yoann's BB plugins",
+  "description": "Personal BB plugins maintained by Yoann Teruel.",
+  "plugins": [
+    {
+      "id": "linear-issues",
+      "displayName": "Linear Issues",
+      "description": "Browse your Linear issues and start a BB thread from any ticket.",
+      "icon": "SquareKanban",
+      "tags": ["linear", "issues", "productivity"],
+      "author": { "name": "Yoann Teruel", "github": "yteruel31" },
+      "source": {
+        "git": {
+          "url": "https://github.com/yteruel31/bb-marketplace.git",
+          "subdir": "plugins/linear-issues",
+          "range": "^0.1.0",
+          "tagPrefix": "linear-issues/"
+        }
+      }
+    }
+  ]
+}
