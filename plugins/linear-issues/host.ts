@@ -13,7 +13,13 @@ import {
   resolveWorktreesRoot,
   resolveWorktreeTargetPath,
 } from "./worktree/host/paths.js";
-import { createWorktree, removeWorktree } from "./worktree/host/worktree.js";
+import {
+  createWorktree,
+  listGitWorktrees,
+  removeWorktree,
+  resolveAdoptableWorktree,
+} from "./worktree/host/worktree.js";
+import { selectAdoptableWorktrees } from "./worktree/host/worktree-list.js";
 import { readDefaultBranchRefs } from "./worktree/vendor/git.js";
 import { createHostProgress } from "./worktree/vendor/progress.js";
 
@@ -65,6 +71,22 @@ function resolveTarget(args: {
   };
 }
 
+/**
+ * Worktrees BB or this plugin created (and may delete on retirement): never
+ * adoptable, or an adopted environment could lose its folder.
+ */
+function managedRoots(dataDir: string, sourcePath: string, worktreesRoot: string | null): string[] {
+  const roots = [resolveWorktreesRoot(dataDir)];
+  if (worktreesRoot !== null) roots.push(resolveCustomRepoRoot({ worktreesRoot, sourcePath }));
+  return roots;
+}
+
+async function adoptableWorktrees(args: { sourcePath: string; roots: string[]; signal?: AbortSignal }) {
+  let entries = await listGitWorktrees(args);
+  for (const managedRoot of args.roots) entries = selectAdoptableWorktrees({ entries, managedRoot });
+  return entries.filter((entry) => !entry.prunable);
+}
+
 async function worktreePathsForPathKey(args: { dataDir: string; pathKey: string }): Promise<string[]> {
   const root = resolveWorktreeAttemptRoot(args);
   try {
@@ -94,12 +116,33 @@ export default experimental_defineHostEntry({
         }),
       };
     },
-    async listWorktrees() {
-      // The Linear worktree provider doesn't adopt existing worktrees.
-      return { worktrees: [] };
+    async listWorktrees(input, context) {
+      const worktrees = await adoptableWorktrees({
+        sourcePath: input.sourcePath,
+        roots: managedRoots(context.experimental_paths.dataDir, input.sourcePath, input.worktreesRoot),
+      });
+      return {
+        worktrees: worktrees.map((entry) => ({
+          path: entry.path,
+          branch: entry.branch,
+          locked: entry.locked,
+          prunable: entry.prunable,
+        })),
+      };
     },
-    async resolveExistingWorktree() {
-      return { status: "failed" as const, message: "Adopting an existing worktree isn't supported here." };
+    async resolveExistingWorktree(input, context) {
+      const roots = managedRoots(context.experimental_paths.dataDir, input.sourcePath, input.worktreesRoot);
+      const resolved = await resolveAdoptableWorktree({
+        sourcePath: input.sourcePath,
+        path: input.path,
+        managedRoot: roots[0]!,
+      });
+      if (resolved.status === "failed") return resolved;
+      const adoptable = await adoptableWorktrees({ sourcePath: input.sourcePath, roots });
+      if (!adoptable.some((entry) => entry.path === resolved.path)) {
+        return { status: "failed" as const, message: `${input.path} is managed by BB and can't be adopted.` };
+      }
+      return resolved;
     },
 
     async inspectTarget(input, context) {
@@ -109,7 +152,16 @@ export default experimental_defineHostEntry({
         succeeds(input.sourcePath, ["show-ref", "--verify", "--quiet", `refs/heads/${input.branchName}`], context.signal),
         succeeds(input.sourcePath, ["check-ref-format", "--branch", input.branchName], context.signal),
       ]);
-      return { targetPath, targetExists, branchExists, validBranchName };
+      const holder = (await listGitWorktrees({ sourcePath: input.sourcePath, signal: context.signal })).find(
+        (entry) => entry.branch === input.branchName && !entry.isMain,
+      );
+      let branchWorktree: { path: string; adoptable: boolean } | null = null;
+      if (holder !== undefined) {
+        const roots = managedRoots(context.experimental_paths.dataDir, input.sourcePath, input.placement?.worktreesRoot ?? null);
+        const adoptable = await adoptableWorktrees({ sourcePath: input.sourcePath, roots, signal: context.signal });
+        branchWorktree = { path: holder.path, adoptable: adoptable.some((entry) => entry.path === holder.path) };
+      }
+      return { targetPath, targetExists, branchExists, validBranchName, branchWorktree };
     },
 
     async create(input, context) {

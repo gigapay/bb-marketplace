@@ -134,6 +134,13 @@ export const rpcContract = defineRpcContract({
       .strict(),
     output: z.object({ ok: z.literal(true) }),
   },
+  // Existing worktrees the Linear worktree picker offers for adoption.
+  worktrees_existing: {
+    input: z.object({ projectId: z.string().min(1).max(100), hostId: z.string().min(1).max(100) }).strict(),
+    output: z.object({
+      worktrees: z.array(z.object({ path: z.string(), branch: z.string().nullable() })),
+    }),
+  },
   // Machine holding the project's default checkout, to preselect a Linear worktree there.
   project_default_host: {
     input: z.object({ projectId: z.string().min(1).max(100) }).strict(),
@@ -485,7 +492,7 @@ export default async function plugin(bb: BbPluginApi) {
     return issue.branchName.trim() || null;
   }
 
-  registerLinearWorktree(bb, {
+  const linearWorktree = registerLinearWorktree(bb, {
     host,
     db,
     worktreesRoot: async () => (await settings.get()).worktreesRoot,
@@ -548,6 +555,13 @@ export default async function plugin(bb: BbPluginApi) {
       storeLink(threadId, identifier, "spawn");
       await bb.storage.kv.set(`teamProject:${teamKey}`, projectId);
       return { ok: true as const };
+    },
+    worktrees_existing: async ({ projectId, hostId }) => {
+      const project = await bb.sdk.projects.get({ projectId });
+      const source = project.sources.find((candidate) => candidate.hostId === hostId && candidate.type === "local_path");
+      if (source === undefined) return { worktrees: [] };
+      const { worktrees } = await linearWorktree.listExisting({ sourcePath: source.path, hostId });
+      return { worktrees: worktrees.filter((entry) => !entry.prunable).map(({ path, branch }) => ({ path, branch })) };
     },
     project_default_host: async ({ projectId }) => {
       const project = await bb.sdk.projects.get({ projectId }).catch(() => null);

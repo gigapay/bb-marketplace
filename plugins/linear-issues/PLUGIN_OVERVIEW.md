@@ -10,7 +10,7 @@ You can also start from a ticket in BB's regular new-thread composer. Use the Li
 
 ## Linear worktrees
 
-The plugin adds a "Linear worktree" environment. It branches off the project's primary branch, directly on the ticket's Linear branch name, like `yoann/gig-123-fix-login`. You can choose where worktrees go on each machine with the Worktrees folder setting, for example `~/worktrees/<repo>/gig-123-fix-login`. A second thread on the same ticket gets `-2`, so an existing branch or folder is never reset.
+The plugin adds a "Linear worktree" environment. It branches off the project's primary branch, directly on the ticket's Linear branch name, like `yoann/gig-123-fix-login`. You can choose where worktrees go on each machine with the Worktrees folder setting, for example `~/worktrees/<repo>/gig-123-fix-login`. If the ticket already has a worktree (from Orca or made by hand) it's reused, and an existing branch is picked up without being reset. You can also choose "New worktree" or pick any existing worktree from the "Work on" control. A second fresh worktree on the same ticket gets `-2`, so nothing is ever overwritten.
 
 ## How linking works
 

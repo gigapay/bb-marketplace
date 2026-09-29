@@ -10,6 +10,7 @@ import { IssueList } from "./views/IssueList";
 import { ThreadHeaderLink } from "./views/ThreadHeaderLink";
 import { ComposerIssuePicker, requestIssuePicker } from "./views/ComposerIssuePicker";
 import { SidebarDecorator } from "./views/SidebarDecorator";
+import { WorktreeInputs } from "./views/WorktreeInputs";
 import type { rpcContract } from "./server";
 import { IDENTIFIER_PATTERN } from "./shared/links";
 
@@ -66,6 +67,10 @@ export default definePluginApp((app) => {
     id: "linked-issue",
     title: "Linear issue",
     component: ThreadHeaderLink,
+  });
+  app.slots.experimental_environmentProviderInputs({
+    environmentProviderId: "linear-worktree",
+    component: WorktreeInputs,
   });
   app.slots.experimental_appOverlay({
     id: "sidebar-badges",

@@ -20,7 +20,13 @@ The plugin registers its own environment provider, `linear-worktree` ("Linear wo
 - The `worktreesRoot` setting (for example `~/worktrees`) puts worktrees at `<folder>/<repo>/<last branch segment>`, like Orca does. Leave it empty to keep BB's per-attempt folder under its data dir.
 - Before creating anything, the server reserves a branch and folder that nobody uses yet (`-2`, `-3`, … when taken) and stores the choice per attempt, so retries reuse it. This matters because BB's create resets the branch (`git worktree add -B`) and clears the target folder, which is only safe on names nobody else holds.
 
-The base branch is always the project's default (primary) branch. There's no inputs control and no adopting of existing worktrees.
+New worktrees always branch off the project's default (primary) branch. A "Work on" control beside the environment picker (`views/WorktreeInputs.tsx`) has three modes:
+
+- Ticket branch (the default). If the ticket's branch is already checked out in a worktree BB doesn't manage (made by Orca or by hand), that worktree is adopted. If the branch exists without a worktree, a worktree is created on it without resetting it, so earlier commits are kept. Otherwise it starts fresh.
+- New worktree. Always starts fresh, and adds `-2` if the branch is taken.
+- An existing worktree of the repository, picked from the list.
+
+Adopted worktrees are attached with `ownsPath: false`. BB never deletes them and never runs setup or teardown scripts on them. Worktrees under BB's data dir or the plugin's worktrees folder are never offered, because BB may delete those when their environment retires.
 
 ## Starting from BB's composer
 

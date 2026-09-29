@@ -18,14 +18,35 @@ const CREATE_TIMEOUT_MS = 15 * 60 * 1000;
 const REMOVE_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_SUFFIX = 20;
 
-// Base branch only; `null` (what a bare selection sends) means the default.
-const inputsSchema = z.preprocess(
+// Three modes, `null` (what a bare selection sends) meaning auto:
+// - auto `{ branch }`: reuse the ticket's worktree or branch when one exists;
+// - `{ kind: "new" }`: always a fresh worktree;
+// - `{ kind: "existing", path }`: adopt a worktree picked in the composer.
+const baseBranchInput = worktreeBaseBranchSchema.default({ kind: "default" });
+export const linearWorktreeInputsSchema = z.preprocess(
   (value) => value ?? undefined,
   z
-    .object({ branch: worktreeBaseBranchSchema.default({ kind: "default" }) })
-    .strict()
+    .union([
+      z.object({ kind: z.literal("existing"), path: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal("new"), branch: baseBranchInput }).strict(),
+      z.object({ branch: baseBranchInput }).strict(),
+    ])
     .default({ branch: { kind: "default" } }),
 );
+type LinearWorktreeInputs = z.infer<typeof linearWorktreeInputsSchema>;
+
+const ADOPTED_RESOURCE = { adopted: true } as const;
+
+function isAdoptedResource(resource: unknown): boolean {
+  return typeof resource === "object" && resource !== null && (resource as { adopted?: unknown }).adopted === true;
+}
+
+function baseBranchOf(inputs: LinearWorktreeInputs): WorktreeBaseBranch {
+  return "branch" in inputs ? inputs.branch : { kind: "default" };
+}
+
+/** Another attempt is already putting this branch in a worktree. */
+class BranchBusyError extends Error {}
 
 type Reservation = {
   branch: string;
@@ -58,7 +79,15 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps): void {
+export interface LinearWorktreeApi {
+  /** Worktrees the composer may offer for adoption on one machine. */
+  listExisting(args: { sourcePath: string; hostId: string }): Promise<{
+    worktrees: { path: string; branch: string | null; locked: boolean; prunable: boolean }[];
+  }>;
+}
+
+export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps): LinearWorktreeApi {
+  const api = {} as LinearWorktreeApi;
   const { host, db } = deps;
   const reports = new Map<string, PluginEnvironmentProviderProgress>();
   host.experimental_onSignal("progress", (event) => {
@@ -119,6 +148,9 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
         for (let n = 1; n <= MAX_SUFFIX; n += 1) {
           const suffix = n === 1 ? "" : `-${n}`;
           const branch = args.fixedBranch ? base : `${base}${suffix}`;
+          if (args.fixedBranch && branchReserved.get(args.sourcePath, branch, args.pathKey)) {
+            throw new BranchBusyError(`${branch} is being set up by another thread`);
+          }
           const placement: WorktreePlacement =
             root === "" ? null : { worktreesRoot: root, dirName: `${dirNameForBranch(base)}${suffix}` };
           const placementJson = placement === null ? null : JSON.stringify(placement);
@@ -143,6 +175,39 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
       throw new Error("Couldn't find a free branch name and folder for this worktree.");
     });
   }
+
+  /** Attach an existing worktree without owning (or ever deleting) it. */
+  async function adopt(
+    context: {
+      host: { id: string };
+      projectCheckout: { path: string };
+      signal: AbortSignal;
+      experimental_claimPath(path: string): Promise<boolean>;
+    },
+    path: string,
+  ): Promise<PluginEnvironmentProviderCreateResult> {
+    const root = (await deps.worktreesRoot()).trim();
+    const resolved = await host.call(
+      "resolveExistingWorktree",
+      { sourcePath: context.projectCheckout.path, path, worktreesRoot: root === "" ? null : root },
+      { hostId: context.host.id, signal: context.signal, timeoutMs: CREATE_TIMEOUT_MS },
+    );
+    if (resolved.status === "failed") return { status: "failed", message: resolved.message };
+    if (!(await context.experimental_claimPath(resolved.path))) {
+      return { status: "failed", message: `${resolved.path} is already in use by another environment.` };
+    }
+    return { status: "created", path: resolved.path, ownsPath: false, resource: ADOPTED_RESOURCE };
+  }
+
+  async function listExisting(args: { sourcePath: string; hostId: string }) {
+    const root = (await deps.worktreesRoot()).trim();
+    return host.call(
+      "listWorktrees",
+      { sourcePath: args.sourcePath, worktreesRoot: root === "" ? null : root },
+      { hostId: args.hostId },
+    );
+  }
+  api.listExisting = listExisting;
 
   async function createManagedWorktree(
     context: {
@@ -208,15 +273,56 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
     description: "A git worktree on the ticket's Linear branch, in your worktrees folder.",
     icon: "linear-issues/linear",
     requires: { gitCheckout: true },
-    inputs: inputsSchema,
+    inputs: linearWorktreeInputsSchema,
     policy: { pathKeys: "per-attempt" },
+    experimental_existingPath: (inputs) => ("kind" in inputs && inputs.kind === "existing" ? inputs.path : null),
     async create(context) {
+      const inputs = context.inputs;
+      if ("kind" in inputs && inputs.kind === "existing") return adopt(context, inputs.path);
       try {
         const linear = await deps.linearBranchFor(context.thread).catch((error) => {
           context.report.log(`Couldn't read the Linear branch, using BB's name: ${errorMessage(error)}`);
           return null;
         });
         if (linear !== null) context.report.step(`Using Linear branch ${linear}`);
+
+        // Auto mode picks up where earlier work on the ticket left off.
+        if (linear !== null && !("kind" in inputs)) {
+          const probe = await host.call(
+            "inspectTarget",
+            { sourcePath: context.projectCheckout.path, pathKey: context.pathKey, branchName: linear, placement: null },
+            { hostId: context.host.id, signal: context.signal },
+          );
+          if (probe.branchWorktree?.adoptable) {
+            const adopted = await adopt(context, probe.branchWorktree.path);
+            if (adopted.status === "created") {
+              context.report.step(`Reusing the existing worktree at ${probe.branchWorktree.path}`);
+              return adopted;
+            }
+            context.report.log(`Couldn't reuse ${probe.branchWorktree.path}; creating a new worktree instead.`);
+          } else if (probe.branchExists && probe.branchWorktree === null) {
+            try {
+              const reservation = await reserve({
+                pathKey: context.pathKey,
+                threadId: context.thread.id,
+                hostId: context.host.id,
+                sourcePath: context.projectCheckout.path,
+                candidates: [linear],
+                fixedBranch: true,
+                signal: context.signal,
+              });
+              context.report.step(`Reusing the existing branch ${linear}`);
+              return await createManagedWorktree(context, reservation, {
+                baseBranch: baseBranchOf(inputs),
+                branchMode: "reuse-existing",
+              });
+            } catch (error) {
+              if (!(error instanceof BranchBusyError)) throw error;
+              context.report.log(`${error.message}; creating a new branch instead.`);
+            }
+          }
+        }
+
         const reservation = await reserve({
           pathKey: context.pathKey,
           threadId: context.thread.id,
@@ -227,7 +333,7 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
           signal: context.signal,
         });
         return await createManagedWorktree(context, reservation, {
-          baseBranch: context.inputs.branch,
+          baseBranch: baseBranchOf(inputs),
           branchMode: "reset",
         });
       } catch (error) {
@@ -236,6 +342,11 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
       }
     },
     async restore(context) {
+      const inputs = context.inputs;
+      if ("kind" in inputs && inputs.kind === "existing") return adopt(context, inputs.path);
+      if (isAdoptedResource(context.previous.resource) && context.previous.environment.path !== null) {
+        return adopt(context, context.previous.environment.path);
+      }
       const branchName = context.previous.environment.branchName;
       if (branchName === null) {
         return {
@@ -254,7 +365,7 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
           signal: context.signal,
         });
         return await createManagedWorktree(context, reservation, {
-          baseBranch: context.inputs.branch,
+          baseBranch: baseBranchOf(inputs),
           branchMode: "reuse-existing",
         });
       } catch (error) {
@@ -263,6 +374,8 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
       }
     },
     async remove(context) {
+      // Adopted worktrees aren't ours: detach without touching the folder.
+      if (isAdoptedResource(context.resource)) return { status: "removed" };
       if (context.hostId === null) return { status: "failed", message: "The worktree machine is unknown" };
       const reservation = readReservation(context.pathKey);
       const operationId = `remove#${context.pathKey}#${context.attempt}`;
@@ -289,4 +402,5 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
       }
     },
   });
+  return api;
 }

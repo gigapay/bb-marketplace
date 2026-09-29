@@ -46,6 +46,8 @@ export const worktreeHostContract = defineRpcContract({
         targetExists: z.boolean(),
         branchExists: z.boolean(),
         validBranchName: z.boolean(),
+        // Where the branch is checked out, and whether we may adopt it there.
+        branchWorktree: z.object({ path: z.string(), adoptable: z.boolean() }).strict().nullable(),
       })
       .strict(),
   },
@@ -54,7 +56,8 @@ export const worktreeHostContract = defineRpcContract({
     output: z.object({ branch: z.string().min(1).nullable() }).strict(),
   },
   listWorktrees: {
-    input: z.object({ sourcePath: z.string().min(1) }).strict(),
+    // linear-issues: + worktreesRoot, so worktrees this plugin manages aren't offered.
+    input: z.object({ sourcePath: z.string().min(1), worktreesRoot: z.string().min(1).nullable() }).strict(),
     output: z.object({ worktrees: z.array(discoveredWorktreeSchema) }).strict(),
   },
   resolveExistingWorktree: {
@@ -62,6 +65,7 @@ export const worktreeHostContract = defineRpcContract({
       .object({
         sourcePath: z.string().min(1),
         path: z.string().min(1),
+        worktreesRoot: z.string().min(1).nullable(),
       })
       .strict(),
     output: z.discriminatedUnion("status", [
