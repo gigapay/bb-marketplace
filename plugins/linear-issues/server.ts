@@ -9,6 +9,8 @@ import { registerLinearWorktree } from "./worktree/provider.js";
 import { IDENTIFIER_PATTERN, LINKS_CHANGED, linkedIssueFromPrompt, resolveLink, resolveThreadLinks } from "./shared/links";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
+const LINEAR_UPLOADS_HOST = "uploads.linear.app";
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 const stateSchema = z.object({
   id: z.string(),
@@ -574,6 +576,50 @@ export default async function plugin(bb: BbPluginApi) {
       projectId: (await bb.storage.kv.get<string>(`teamProject:${teamKey}`)) ?? null,
     }),
   });
+
+  // Linear serves pasted images and attachments from uploads.linear.app only
+  // with the API key, so <img> tags in the UI point here and the key stays on
+  // the server. Only that host is proxied, so the key can't leak elsewhere.
+  bb.http.route(
+    "GET",
+    "/upload",
+    async (c) => {
+      let target: URL;
+      try {
+        target = new URL(c.req.query("url") ?? "");
+      } catch {
+        return c.text("Invalid url", 400);
+      }
+      if (target.protocol !== "https:" || target.hostname !== LINEAR_UPLOADS_HOST) {
+        return c.text("Only Linear uploads can be proxied", 403);
+      }
+      const apiKey = await readApiKey();
+      if (apiKey === null) return c.text("Linear API key is not configured", 503);
+      const upstream = await fetch(target, {
+        headers: { Authorization: apiKey },
+        signal: AbortSignal.timeout(30_000),
+      }).catch(() => null);
+      if (upstream === null || !upstream.ok || upstream.body === null) {
+        return c.text("Couldn't fetch the upload from Linear", 502);
+      }
+      const length = Number(upstream.headers.get("content-length") ?? "0");
+      if (length > MAX_UPLOAD_BYTES) return c.text("Upload too large to preview", 413);
+      const type = upstream.headers.get("content-type") ?? "application/octet-stream";
+      const inline = /^(image|video)\//.test(type);
+      return new Response(upstream.body, {
+        headers: {
+          "Content-Type": inline ? type : "application/octet-stream",
+          ...(inline ? {} : { "Content-Disposition": "attachment" }),
+          ...(length > 0 ? { "Content-Length": String(length) } : {}),
+          "Cache-Control": "private, max-age=3600",
+          "X-Content-Type-Options": "nosniff",
+          // An uploaded SVG opened directly can't run scripts.
+          "Content-Security-Policy": "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
+        },
+      });
+    },
+    { auth: "local" },
+  );
 
   // Lets agents in a thread started from a ticket re-read it on demand.
   const usage = [

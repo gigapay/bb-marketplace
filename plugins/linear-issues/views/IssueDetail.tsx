@@ -12,6 +12,7 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { proxyLinearUploads } from "@/lib/uploads";
 import { buildIssuePrompt } from "@/lib/prompt";
 import type { IssueDetail as Issue, rpcContract } from "../server";
 import { SOURCE_LABELS, useIssueLinks, type LinkedThread } from "./links";
@@ -232,7 +233,7 @@ function IssueBody({ issue }: { issue: Issue }) {
 
       <section className="mt-6">
         {issue.description?.trim() ? (
-          <Markdown content={issue.description} />
+          <Markdown content={proxyLinearUploads(issue.description)} />
         ) : (
           <p className="text-sm italic text-muted-foreground">No description.</p>
         )}
@@ -264,7 +265,7 @@ function IssueBody({ issue }: { issue: Issue }) {
                   {" · "}
                   {relativeTime(comment.createdAt)}
                 </p>
-                <Markdown content={comment.body} />
+                <Markdown content={proxyLinearUploads(comment.body)} />
               </li>
             ))}
           </ol>

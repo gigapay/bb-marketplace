@@ -5,6 +5,7 @@ import { Markdown, UrlLink, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app
 import type { PluginThreadPanelProps } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { proxyLinearUploads } from "@/lib/uploads";
 import type { IssueDetail, rpcContract } from "../server";
 import { issueIdentifierFromBranch } from "../shared/links";
 import { SOURCE_LABELS, useIssueLinks } from "./links";
@@ -195,7 +196,7 @@ function LinkedIssue({
 
           <section>
             {issue.description?.trim() ? (
-              <Markdown content={issue.description} />
+              <Markdown content={proxyLinearUploads(issue.description)} />
             ) : (
               <p className="text-sm italic text-muted-foreground">No description.</p>
             )}
@@ -227,7 +228,7 @@ function LinkedIssue({
                       {" · "}
                       {relativeTime(comment.createdAt)}
                     </p>
-                    <Markdown content={comment.body} />
+                    <Markdown content={proxyLinearUploads(comment.body)} />
                   </li>
                 ))}
               </ol>
