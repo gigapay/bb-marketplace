@@ -12,11 +12,21 @@ bb plugin config linear-issues set apiKey <key>
 
 The key is a secret setting. It stays on the BB server and never reaches the browser.
 
+## Linear worktree environment
+
+The plugin registers its own environment provider, `linear-worktree` ("Linear worktree"), built from BB's bundled Worktree provider (see `worktree/ORIGIN.md`). It differs in three ways:
+
+- The branch is the ticket's Linear `branchName`, like `yoann/gig-123-fix-login`. The ticket comes from the thread's stored link or from a title or prompt that starts with the identifier. Threads without a ticket keep BB's generated name.
+- The `worktreesRoot` setting (for example `~/worktrees`) puts worktrees at `<folder>/<repo>/<last branch segment>`, like Orca does. Leave it empty to keep BB's per-attempt folder under its data dir.
+- Before creating anything, the server reserves a branch and folder that nobody uses yet (`-2`, `-3`, … when taken) and stores the choice per attempt, so retries reuse it. This matters because BB's create resets the branch (`git worktree add -B`) and clears the target folder, which is only safe on names nobody else holds.
+
+The base branch is always the project's default (primary) branch. There's no inputs control and no adopting of existing worktrees.
+
 ## Starting from BB's composer
 
-The plugin adds a Linear button to the root new-thread composer (`app.composer.customize`) and a `+` menu entry. Picking a ticket does two things. It sets the environment to the `git-worktree` provider on the machine already selected, which bases the worktree on the default (primary) branch. It also writes a prompt whose first line is `GIG-123: <title>`. BB builds the worktree branch as `<prefix><slug of the title fallback>-<threadId>`, and that fallback is the start of the prompt, so the branch name starts with the identifier. A plugin can't pick that name up front. So once the worktree exists (on `thread.active`, with `thread.idle` as a fallback), the server asks the plugin's host entry (`host.ts`) to rename BB's generated branch to the ticket's Linear `branchName` with `git branch -m`. It only does this for threads started from a ticket, only when the current branch still ends with the thread id and has never been pushed (no upstream), and only once per thread. A taken name gets `-2`, `-3`, and so on. BB re-reads the branch on its next status poll, so the sidebar and PR tools follow along. You can turn it off with the `renameWorktreeBranch` setting.
+The plugin adds a Linear button to the root new-thread composer (`app.composer.customize`) and a `+` menu entry. Picking a ticket switches the environment to a Linear worktree on the machine already selected, and writes a prompt whose first line is `GIG-123: <title>`. The ticket page's composer preselects a Linear worktree on the project's default machine.
 
-The prompt carries a `Linked Linear issue: GIG-123` line. A `message.dispatch` hook on the server reads it on the first send and stores the link, so it works however the thread was sent.
+The prompt carries a `Linked Linear issue: GIG-123` line. A `message.dispatch` hook on the server reads it on the first send and stores the link, so it works however the thread was sent. Threads on BB's regular Worktree provider still get their generated branch renamed to the Linear name after creation (`renameWorktreeBranch`), as long as it was never pushed.
 
 ## Sidebar badges
 
@@ -34,7 +44,7 @@ A thread is linked to an issue when it was started from a ticket (issue page or 
 - `views/IssueDetail.tsx` shows one issue: its metadata, description, sub-issues and comments, its linked threads, and BB's new-thread composer seeded with the ticket and the last project used for that team.
 - `views/ThreadHeaderLink.tsx` is the chip in the thread header that shows, links, changes or unlinks the issue.
 - `views/links.tsx` resolves every thread's link from stored rows plus branch names (`shared/links.ts`, covered by `npm test`).
-- `host.ts` and `contract.ts` hold the host-side git rename.
+- `worktree/provider.ts` is the Linear worktree provider. `worktree/host` and `worktree/vendor` are the host-side git code copied from BB, and `host.ts` and `contract.ts` merge it with the branch rename into the plugin's single host entry.
 - `assets/linear.svg` is the Linear mark. It's the plugin icon, and `linear-issues/linear` everywhere in the UI.
 - `lib/prompt.ts` builds that seeded prompt. The description is wrapped as untrusted reference data.
 - `skills/linear-issues/SKILL.md` tells agents how to use `bb linear-issues show <id>`.
@@ -43,6 +53,7 @@ A thread is linked to an issue when it was started from a ticket (issue page or 
 
 ```
 npm install
+npm test
 bb plugin build
 bb plugin install .
 bb plugin dev

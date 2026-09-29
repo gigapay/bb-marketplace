@@ -4,7 +4,8 @@
 // this backend. app.tsx talks to it over the RPC contract below.
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { hostContract } from "./contract.js";
+import { hostContract, hostSignals } from "./contract.js";
+import { registerLinearWorktree } from "./worktree/provider.js";
 import { IDENTIFIER_PATTERN, LINKS_CHANGED, linkedIssueFromPrompt, resolveLink, resolveThreadLinks } from "./shared/links";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
@@ -133,6 +134,11 @@ export const rpcContract = defineRpcContract({
       .strict(),
     output: z.object({ ok: z.literal(true) }),
   },
+  // Machine holding the project's default checkout, to preselect a Linear worktree there.
+  project_default_host: {
+    input: z.object({ projectId: z.string().min(1).max(100) }).strict(),
+    output: z.object({ hostId: z.string().nullable() }),
+  },
   team_project_get: {
     input: z.object({ teamKey: z.string().min(1).max(20) }).strict(),
     output: z.object({ projectId: z.string().nullable() }),
@@ -228,8 +234,19 @@ export default async function plugin(bb: BbPluginApi) {
         "When a thread started from a ticket gets a new worktree, rename BB's generated branch to the ticket's Linear branch.",
       default: true,
     },
+    worktreesRoot: {
+      type: "string",
+      label: "Worktrees folder",
+      description:
+        "Where Linear worktrees are created on each machine, e.g. ~/worktrees (gives ~/worktrees/<repo>/<ticket-branch>). Leave empty to use BB's own folder.",
+      default: "",
+      experimental_schema: z
+        .string()
+        .max(1024)
+        .refine((value) => value.trim() === "" || /^(~\/|~$|\/)/.test(value.trim()), "Use an absolute path or one starting with ~/"),
+    },
   });
-  const host = bb.hosts.experimental_client({ contract: hostContract });
+  const host = bb.hosts.experimental_client({ contract: hostContract, experimental_signals: hostSignals });
 
   async function readApiKey(): Promise<string | null> {
     const { apiKey } = await settings.get();
@@ -333,6 +350,14 @@ export default async function plugin(bb: BbPluginApi) {
       status TEXT NOT NULL CHECK (status IN ('renamed', 'skipped', 'failed')),
       detail TEXT NOT NULL,
       updated_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE worktree_reservations (
+      path_key TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      source_path TEXT NOT NULL,
+      placement TEXT,
+      created_at INTEGER NOT NULL
     )`,
   ]);
   const selectLinks = db.prepare(
@@ -442,6 +467,31 @@ export default async function plugin(bb: BbPluginApi) {
     return links.get(threadId) ?? null;
   }
 
+  // The ticket a new thread is for, as early as environment creation: the
+  // issue page stores the link after spawn and titles the thread
+  // "GIG-12: …"; BB's composer seeds a prompt whose first line is the same,
+  // which becomes the title fallback.
+  async function linearBranchFor(thread: { id: string; title: string | null; titleFallback: string | null }) {
+    const stored = selectLink.get(thread.id) as StoredLink | undefined;
+    let identifier = stored?.identifier ?? null;
+    if (identifier === null && stored === undefined) {
+      const match = /^\s*([A-Za-z][A-Za-z0-9]{0,9})-(\d{1,7})\b/.exec(thread.title ?? thread.titleFallback ?? "");
+      if (match && (await teamKeys()).includes(match[1]!.toUpperCase())) {
+        identifier = `${match[1]!.toUpperCase()}-${Number(match[2])}`;
+      }
+    }
+    if (identifier === null) return null;
+    const issue = await getIssue(identifier);
+    return issue.branchName.trim() || null;
+  }
+
+  registerLinearWorktree(bb, {
+    host,
+    db,
+    worktreesRoot: async () => (await settings.get()).worktreesRoot,
+    linearBranchFor,
+  });
+
   // Links a thread when its first message carries the "Linked Linear issue:"
   // line the plugin seeds, so it works from BB's own composer too. It must
   // never block a send: any failure just proceeds without a link.
@@ -498,6 +548,12 @@ export default async function plugin(bb: BbPluginApi) {
       storeLink(threadId, identifier, "spawn");
       await bb.storage.kv.set(`teamProject:${teamKey}`, projectId);
       return { ok: true as const };
+    },
+    project_default_host: async ({ projectId }) => {
+      const project = await bb.sdk.projects.get({ projectId }).catch(() => null);
+      const sources = project?.sources.filter((source) => source.type === "local_path") ?? [];
+      const source = sources.find((candidate) => candidate.isDefault) ?? sources[0];
+      return { hostId: source?.hostId ?? null };
     },
     team_project_get: async ({ teamKey }) => ({
       projectId: (await bb.storage.kv.get<string>(`teamProject:${teamKey}`)) ?? null,

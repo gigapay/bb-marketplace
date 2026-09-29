@@ -2,8 +2,12 @@
 // renaming a freshly created worktree branch to the Linear branch name.
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { worktreeHostContract, worktreeHostSignals } from "./worktree/contract.js";
+
+export const hostSignals = worktreeHostSignals;
 
 export const hostContract = defineRpcContract({
+  ...worktreeHostContract,
   renameBranch: {
     input: z
       .object({

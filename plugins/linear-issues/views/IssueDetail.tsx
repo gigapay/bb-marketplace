@@ -79,6 +79,21 @@ function IssueBody({ issue }: { issue: Issue }) {
     };
   }, [rpc, issue.team.key]);
   const defaultProjectId = teamProjectId ?? routeProjectId ?? undefined;
+  // Seed a Linear worktree on the project's machine once it's known; the
+  // composer re-seeds on change, so wait for it before mounting.
+  const [defaultHostId, setDefaultHostId] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (teamProjectId === undefined) return;
+    if (defaultProjectId === undefined) return setDefaultHostId(null);
+    let cancelled = false;
+    rpc.call("project_default_host", { projectId: defaultProjectId }).then(
+      (result) => !cancelled && setDefaultHostId(result.hostId),
+      () => !cancelled && setDefaultHostId(null),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [rpc, teamProjectId, defaultProjectId]);
   const composerRef = useRef<HTMLDivElement>(null);
   const [focusRequest, setFocusRequest] = useState(0);
   const initialPrompt = useMemo(() => buildIssuePrompt(issue), [issue]);
@@ -262,7 +277,7 @@ function IssueBody({ issue }: { issue: Issue }) {
           Pick the project in the row under the prompt. The last project you used for {issue.team.name} is
           preselected.
         </p>
-        {teamProjectId === undefined ? (
+        {teamProjectId === undefined || defaultHostId === undefined ? (
           <EmptyState>Loading composer…</EmptyState>
         ) : (
           <NewThreadComposer
@@ -271,6 +286,16 @@ function IssueBody({ issue }: { issue: Issue }) {
             focusRequest={focusRequest}
             draftKey={`issue:${issue.id}`}
             {...(defaultProjectId ? { defaultProjectId } : {})}
+            {...(defaultHostId
+              ? {
+                  defaultEnvironment: {
+                    type: "provider" as const,
+                    environmentProviderId: "linear-worktree",
+                    machine: { type: "existing" as const, hostId: defaultHostId },
+                    inputs: {},
+                  },
+                }
+              : {})}
             onSubmit={async (request) => {
               const thread = await sdk.threads.spawn({
                 ...request,

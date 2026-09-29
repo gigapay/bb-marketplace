@@ -15,7 +15,8 @@ import { LINKED_ISSUE_PREFIX, linkedIssueFromPrompt } from "../shared/links";
 import { IssuePickerDialog } from "./pickers";
 import { errorText } from "./shared";
 
-const GIT_WORKTREE_PROVIDER_ID = "git-worktree";
+// Registered by this plugin's server (worktree/provider.ts).
+const LINEAR_WORKTREE_PROVIDER_ID = "linear-worktree";
 
 // The `+` menu row runs outside React; it asks the mounted action to open
 // its picker. Only the root new-thread composer mounts this action.
@@ -43,30 +44,29 @@ function hostIdOf(environment: Environment | undefined): string | null {
 }
 
 /**
- * Switches to a git worktree on the machine already selected. Its base branch
- * defaults to the project's primary branch; BB names the new branch from the
- * prompt's first line, which starts with the identifier.
+ * Switches to a Linear worktree on the machine already selected. It branches
+ * off the project's primary branch and names the branch after the ticket.
  */
 async function ensureWorktree(composer: PluginComposerApi): Promise<void> {
   const current = await composer.experimental_setSelection({});
   const environment = current.environment;
-  if (environment?.type === "provider" && environment.environmentProviderId === GIT_WORKTREE_PROVIDER_ID) {
+  if (environment?.type === "provider" && environment.environmentProviderId === LINEAR_WORKTREE_PROVIDER_ID) {
     return;
   }
   const hostId = hostIdOf(environment);
   if (hostId === null) {
-    toast.info("Pick a Worktree environment so the thread gets its own branch.");
+    toast.info("Pick the Linear worktree environment so the thread gets the ticket's branch.");
     return;
   }
   const next = await composer.experimental_setSelection({
     environment: {
       type: "provider",
-      environmentProviderId: GIT_WORKTREE_PROVIDER_ID,
+      environmentProviderId: LINEAR_WORKTREE_PROVIDER_ID,
       machine: { type: "existing", hostId },
-      inputs: null,
+      inputs: {},
     },
   });
-  if (next.environment?.type !== "provider" || next.environment.environmentProviderId !== GIT_WORKTREE_PROVIDER_ID) {
+  if (next.environment?.type !== "provider" || next.environment.environmentProviderId !== LINEAR_WORKTREE_PROVIDER_ID) {
     toast.info("Couldn't switch to a worktree here. Pick the environment by hand.");
   }
 }
