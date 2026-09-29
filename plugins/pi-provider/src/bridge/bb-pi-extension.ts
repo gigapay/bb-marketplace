@@ -414,6 +414,12 @@ function boundedId(value, max) {
     : null;
 }
 
+function displayText(value, max) {
+  if (typeof value !== "string") return null;
+  const text = value.trim().slice(0, max);
+  return text.length > 0 ? text : null;
+}
+
 function isTimestamp(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
@@ -449,6 +455,19 @@ function projectLifecycleRun(run) {
   if (run.settledAt !== undefined) {
     if (!isTimestamp(run.settledAt)) return null;
     projected.settledAt = run.settledAt;
+  }
+  // Optional display fields: a bad one is dropped, never the whole run.
+  const agent = displayText(run.agent, LIFECYCLE_LIMITS.agentLength);
+  if (agent) projected.agent = agent;
+  const model = displayText(run.model, LIFECYCLE_LIMITS.modelLength);
+  if (model) projected.model = model;
+  if (
+    typeof run.thinking === "string" &&
+    run.thinking.length > 0 &&
+    run.thinking.length <= LIFECYCLE_LIMITS.thinkingLength &&
+    /^[a-z0-9_-]+$/.test(run.thinking)
+  ) {
+    projected.thinking = run.thinking;
   }
   return projected;
 }

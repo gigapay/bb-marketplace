@@ -11,6 +11,7 @@ import {
 } from "./lifecycle-contract.js";
 import {
   SubagentLifecycleTranslator,
+  describeRun,
   subagentProviderItemId,
 } from "./lifecycle-translator.js";
 
@@ -405,5 +406,41 @@ describe("the subagent lifecycle translator's owners and resets", () => {
     h.translator.handleEvent(THREAD, OWNER, upsert({ status: "running" }));
     expect(h.translator.activeRunCount(THREAD)).toBe(0);
     expect(h.pendingTimers()).toBe(0);
+  });
+});
+
+describe("the subagent row text", () => {
+  it("shows the agent-file profile, model, and thinking, and the profile only when it adds something", () => {
+    expect(describeRun(run({ label: "Recapture dialogs", agent: "designer", model: "openai-codex/gpt-5.6-sol", thinking: "high" }))).toBe(
+      "Recapture dialogs (designer) · openai-codex/gpt-5.6-sol · high",
+    );
+    // pi-toolbox falls back to the profile as label when no name was given.
+    expect(describeRun(run({ label: "designer", agent: "designer", model: "m" }))).toBe("designer · m");
+    // Ad-hoc runs carry no profile.
+    expect(describeRun(run({ label: "Quick check", thinking: "low" }))).toBe("Quick check · low");
+    expect(describeRun(run({ label: "  " }))).toBe("Subagent");
+  });
+
+  it("updates the row when routing resolves the effective model", () => {
+    const h = harness();
+    h.assemble(TURN_WITH_SPAWN_TOOL);
+    h.translator.observeToolStart(THREAD, "call-1");
+    h.translator.handleEvent(THREAD, OWNER, upsert({ status: "running", model: "requested" }));
+    h.translator.handleEvent(THREAD, OWNER, upsert({ status: "running", model: "effective" }));
+    h.translator.handleEvent(THREAD, OWNER, upsert({ status: "running", model: "effective" }));
+    h.assemble();
+    expect(backgroundEvents(h.events).map((event) => event.item.description)).toEqual([
+      "reviewer · requested",
+      "reviewer · effective",
+    ]);
+  });
+
+  it("rejects display fields outside their bounds", () => {
+    const bad = (overrides: Partial<SubagentLifecycleRun>) =>
+      parseSubagentsLifecycleChannelMessage({ kind: "subagents-lifecycle", event: upsert(overrides) });
+    expect(bad({ agent: "a".repeat(101) })).toBeNull();
+    expect(bad({ model: "" })).toBeNull();
+    expect(bad({ thinking: "High Effort" })).toBeNull();
+    expect(bad({ agent: "designer", model: "m", thinking: "xhigh" })).not.toBeNull();
   });
 });

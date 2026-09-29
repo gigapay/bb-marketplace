@@ -53,7 +53,7 @@ If upstream ever ships native pi-toolbox support, drop the matching fork blocks 
 
 pi-toolbox's subagents package (`@yteruel31/pi-subagents`) publishes run lifecycle on Pi's in-process `pi.events` bus: `pi-toolbox:subagents:lifecycle` for events, and `pi-toolbox:subagents:lifecycle:request` for snapshot requests. This needs pi-toolbox commit [`ac4c248`](https://github.com/yteruel31/pi-toolbox/commit/ac4c24815a46c17e72d3b52af8374b74409e331b) (PR #88) or later. Older versions just show no tasks. The bus never reaches Pi's RPC stdout, so:
 
-1. The generated bb extension subscribes when it loads and requests a snapshot (again at `session_start`), copies an allowlist (`id`, `label`, `toolCallId`, `harness`, `status`, `createdAt`, `settledAt` plus the `v`/`sessionId`/`sourceId`/`sequence` envelope) with bounded lengths, and writes `{ kind: "subagents-lifecycle", event }` on FD 3. This envelope is private to this plugin, not a bb protocol.
+1. The generated bb extension subscribes when it loads and requests a snapshot (again at `session_start`), copies an allowlist (`id`, `label`, `toolCallId`, `harness`, `status`, `createdAt`, `settledAt`, and the optional display fields `agent`, `model`, `thinking`, plus the `v`/`sessionId`/`sourceId`/`sequence` envelope) with bounded lengths, and writes `{ kind: "subagents-lifecycle", event }` on FD 3. This envelope is private to this plugin, not a bb protocol.
 2. `rpc-session.ts` validates it again with a strict schema (unknown fields, oversized values, wrong versions, and more than 256 snapshot runs are dropped) and delivers it in stdout order, idle or not.
 3. `src/subagents/lifecycle-translator.ts` keeps per-thread run state apart from the per-turn tool state and emits bb's native `backgroundTask` items (`taskType: "local_agent"`, `skipTranscript: false`, `parentRef` = Pi's `execute` tool-call id, so the task nests under its `subagent_spawn` call).
 
@@ -64,6 +64,8 @@ pi-toolbox's subagents package (`@yteruel31/pi-subagents`) publishes run lifecyc
 | completed | completed | completed |
 | failed | failed | failed |
 | cancelled | stopped | interrupted |
+
+The task row reads `label (agent) · model · thinking`, e.g. `Recapture dialogs (designer) · openai-codex/gpt-5.6-sol · high`. `agent` is the agent-file profile, which pi-toolbox only sends for runs spawned with `subagent_spawn.agent`. Ad-hoc runs show no profile, like pi-toolbox's own UI. The profile is skipped when the label already is it. `model` is pi-toolbox's `effectiveModel ?? requestedModel`, and the row updates when routing resolves it. BB 0.44's `backgroundTask` has no model field, so the text carries it. These fields need a pi-toolbox version that publishes them. Older ones just show the label.
 
 The behaviors that make it hold together:
 

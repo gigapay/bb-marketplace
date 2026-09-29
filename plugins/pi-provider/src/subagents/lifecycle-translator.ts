@@ -89,6 +89,18 @@ export function subagentProviderItemId(sessionId: string, runId: string): string
   return `pi-subagent:${encodeURIComponent(sessionId)}:${encodeURIComponent(runId)}`;
 }
 
+/**
+ * The row text: `label (agent) · model · thinking`. The profile shows only
+ * for agent-file runs (pi-toolbox omits it for ad-hoc ones) and only when the
+ * label isn't already that profile, like pi-toolbox's own run identity.
+ */
+export function describeRun(run: SubagentLifecycleRun): string {
+  const label = run.label.trim() || "Subagent";
+  const identity =
+    run.agent !== undefined && run.agent !== label ? `${label} (${run.agent})` : label;
+  return [identity, run.model, run.thinking].filter(Boolean).join(" · ");
+}
+
 function remember<T>(set: Set<T>, value: T, max: number): void {
   set.delete(value);
   set.add(value);
@@ -432,7 +444,7 @@ export class SubagentLifecycleTranslator {
       this.close(tracked, deltas);
       return;
     }
-    if (previous.status !== run.status || previous.label !== run.label) {
+    if (previous.status !== run.status || describeRun(previous) !== describeRun(run)) {
       deltas.push({
         kind: "item.progress",
         key: this.itemKey(tracked),
@@ -539,7 +551,7 @@ export class SubagentLifecycleTranslator {
       type: "backgroundTask",
       familyId: tracked.providerItemId,
       taskType: SUBAGENT_TASK_TYPE,
-      description: tracked.run.label.trim() || "Subagent",
+      description: describeRun(tracked.run),
       status: backgroundTaskItemStatus(taskStatus),
       taskStatus,
       // bb hides skipTranscript tasks from the timeline and the agent list.
