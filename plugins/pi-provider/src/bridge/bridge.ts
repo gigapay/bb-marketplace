@@ -93,6 +93,11 @@ import {
   resolvePiProviderStateDir,
   writeLoadedSkillsManifest,
 } from "../loaded-skills.js";
+import {
+  extensionCommandNames,
+  leadingCommandName,
+  notifyDeltas,
+} from "../extension-commands.js";
 
 const piCommandSchema = z.discriminatedUnion("method", [
   z.object({
@@ -214,6 +219,8 @@ interface ThreadSession {
   cwd: string;
   construction: PiSessionParams;
   constructionModel: { provider: string; id: string } | undefined;
+  /** Fork addition: pi's `get_commands` answer for this child, once asked. */
+  commands?: Promise<unknown>;
 }
 
 let sessionSerialCounter = 0;
@@ -471,6 +478,13 @@ function createOnExtensionUiRequest(
   return (request) => {
     const threadSession = getCurrentThreadSession(args);
     if (!threadSession || threadSession.closing) return;
+    if (
+      request.method === "notify" &&
+      threadSession.session.hasExtensionCommandInFlight()
+    ) {
+      // Fork addition: what a command reports is its only visible output.
+      sendThreadDeltas(args.threadId, notifyDeltas(request));
+    }
     extensionUi.handle({
       scope: threadSession,
       request,
@@ -859,8 +873,9 @@ const LOADED_SKILLS_TIMEOUT_MS = 10_000;
  * failure keeps the previous record and never affects the thread.
  */
 async function recordLoadedSkills(threadSession: ThreadSession): Promise<void> {
+  threadSession.commands = threadSession.session.getCommands(LOADED_SKILLS_TIMEOUT_MS);
   try {
-    const data = await threadSession.session.getCommands(LOADED_SKILLS_TIMEOUT_MS);
+    const data = await threadSession.commands;
     writeLoadedSkillsManifest({
       stateDir: resolvePiProviderStateDir({ env: process.env, homeDir: homedir() }),
       cwd: threadSession.cwd,
@@ -1025,16 +1040,36 @@ async function handleThreadFork(
   );
 }
 
-function startPiPrompt(
+/** Fork addition: whether `text` invokes one of this child's extension commands. */
+async function isExtensionCommand(
+  threadSession: ThreadSession,
+  text: string,
+): Promise<boolean> {
+  const name = leadingCommandName(text);
+  if (name === null || name.startsWith("skill:")) return false;
+  try {
+    const data = await (threadSession.commands ??
+      threadSession.session.getCommands(LOADED_SKILLS_TIMEOUT_MS));
+    return extensionCommandNames(data).has(name);
+  } catch {
+    return false;
+  }
+}
+
+async function startPiPrompt(
   threadSession: ThreadSession,
   threadId: string,
   text: string,
   images: ImageContent[],
 ): Promise<void> {
-  const dispatch = threadSession.session.prompt(
-    text,
-    images.length > 0 ? images : undefined,
-  );
+  const command = images.length === 0 && (await isExtensionCommand(threadSession, text));
+  if (command) {
+    // pi emits no agent run for it, so this bridge owns the turn's edges.
+    sendThreadDeltas(threadId, [{ kind: "turn.open" }]);
+  }
+  const dispatch = command
+    ? threadSession.session.runExtensionCommand(text)
+    : threadSession.session.prompt(text, images.length > 0 ? images : undefined);
   void dispatch.settled.then((outcome) => {
     if (outcome === null) {
       return;

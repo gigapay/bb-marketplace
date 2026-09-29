@@ -94,6 +94,12 @@ Pi 0.87 has no RPC reload. Its `/reload` is interactive-only, and `ctx.reload()`
 - It's refused with an actionable error while a turn, compaction, queued input, or another `turn/start` is in flight (on `turn/start` and `turn/steer`), or while a pi-toolbox subagent is still running, even one that isn't displayed, since a restart would cancel it.
 - The reload row settles only after the new child reported ready, and before the `session.reset` that follows it. If the new child fails, the previous runtime stays active and the row says so. Just send `/reload` again. Turns, stops, and discards sent during a reload wait for it.
 
+## Pi extension commands
+
+Pi runs an extension command (`pi.registerCommand`) sent through RPC `prompt` in place: it emits no `agent_start`/`agent_end` and answers the prompt once the handler returned. The bundled provider waits for an agent run, so such a turn stays "Working" forever. This fork checks the child's `get_commands` catalog: a prompt whose first word is one of its extension commands (`/extensions`, `/subagents`, ...) opens and settles its own turn when pi answers, or when the run the handler started (`pi.sendMessage`) ends. `notify` calls made while the command runs show up as the command's output (info as a message, warnings and errors as notices); outside a command they stay dropped, like upstream.
+
+Commands built only for Pi's interactive TUI (`ctx.ui.custom`, or a `ctx.mode !== "tui"` guard like gigapay/pi-extension-manager's `/extensions`) can't render in bb; you now see their notice instead of a stuck turn. Extension commands aren't listed in the `/` menu (bb's command roots need files), but typing them works.
+
 ## Skills in the / menu
 
 bb scans the directories a provider declares or resolves on the host. Pi also loads skills it only learns about at runtime: `resources_discover` results from extensions (pi-toolbox or Claude marketplace generated skills), git and npm Pi packages, `settings.json` file entries. Upstream's resolver can't see those.

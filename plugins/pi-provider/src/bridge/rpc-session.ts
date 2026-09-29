@@ -133,6 +133,9 @@ export interface PiRpcSessionState {
 export class PiRpcSession {
   private child: PiRpcChild | undefined;
   private isProcessing = false;
+  private agentRunsStarted = 0;
+  private agentRunsEnded = 0;
+  private extensionCommandsInFlight = 0;
   private isCompacting = false;
   private manualCompactionCompletionCount = 0;
   private lastCompactionEndDelivery: Promise<void> = Promise.resolve();
@@ -178,6 +181,7 @@ export class PiRpcSession {
     return (
       this.isProcessing ||
       this.isCompacting ||
+      this.extensionCommandsInFlight > 0 ||
       this.pendingInputConsumptions.length > 0 ||
       this.pendingRunSettlements.length > 0
     );
@@ -344,6 +348,53 @@ export class PiRpcSession {
     const state = (data ?? {}) as PiRpcSessionState;
     this.liveModel = state.model;
     return state;
+  }
+
+  /** A pi extension command handler is running (see runExtensionCommand). */
+  hasExtensionCommandInFlight(): boolean {
+    return this.extensionCommandsInFlight > 0;
+  }
+
+  /**
+   * Fork addition: run a pi extension command. pi answers the prompt once the
+   * handler returned and emits no agent run for it, so the command settles on
+   * that answer; a run the handler started (`pi.sendMessage`) settles it
+   * instead when it is still going.
+   */
+  runExtensionCommand(text: string): PiInputDispatch {
+    const child = this.child;
+    if (!child || child.exited) {
+      const consumed = Promise.reject(new Error("No active Pi session"));
+      void consumed.catch(() => undefined);
+      return { consumed, settled: Promise.resolve(null) };
+    }
+    const startedBefore = this.agentRunsStarted;
+    this.extensionCommandsInFlight += 1;
+    const settled = this.dispatchWithTransientAuthRetry(
+      child,
+      { type: "prompt", message: text },
+      NO_REQUEST_TIMEOUT,
+    )
+      .then(
+        async (): Promise<PiPromptRunOutcome> => {
+          if (
+            this.agentRunsStarted > startedBefore &&
+            this.agentRunsEnded < this.agentRunsStarted
+          ) {
+            return new Promise<PiPromptRunOutcome>((resolve) => {
+              this.pendingRunSettlements.push({ resolve });
+            });
+          }
+          return {};
+        },
+        (error: unknown): PiPromptRunOutcome => ({ error }),
+      )
+      .finally(() => {
+        this.extensionCommandsInFlight -= 1;
+      });
+    // The command is taken as soon as it is written: its handler may wait on
+    // a dialog the user answers much later.
+    return { consumed: Promise.resolve(), settled };
   }
 
   /** pi's `get_commands`: extension commands, prompt templates, skills. */
@@ -821,8 +872,10 @@ export class PiRpcSession {
     ) {
       this.isProcessing = true;
     }
+    if (event.type === "agent_start") this.agentRunsStarted += 1;
     if (event.type === "agent_end" && event.willRetry !== true) {
       this.isProcessing = false;
+      this.agentRunsEnded += 1;
     }
     if (event.type === "compaction_end" && event.reason === "manual") {
       this.isProcessing = false;

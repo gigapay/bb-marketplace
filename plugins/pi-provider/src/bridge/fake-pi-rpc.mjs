@@ -185,6 +185,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const extensionTools = new Map();
 const extensionHandlers = new Map();
+const extensionCommands = new Map();
+let notifySerial = 0;
 // pi's in-process extension bus (core/event-bus.ts): shared by every loaded
 // extension, synchronous, handler errors isolated.
 const busHandlers = new Map();
@@ -288,6 +290,9 @@ function extensionApi() {
       const handlers = extensionHandlers.get(type) ?? [];
       handlers.push(handler);
       extensionHandlers.set(type, handlers);
+    },
+    registerCommand(name, options) {
+      extensionCommands.set(name, options);
     },
     getActiveTools: () => [...activeTools],
     setActiveTools(names) {
@@ -609,6 +614,14 @@ async function handle(command) {
           commands = [];
         }
       }
+      for (const [name, options] of extensionCommands) {
+        commands.push({
+          name,
+          description: options.description,
+          source: "extension",
+          sourceInfo: { path: "/fake/extension.mjs", scope: "user", source: "local", origin: "top-level" },
+        });
+      }
       respond(id, "get_commands", { commands });
       return;
     }
@@ -639,6 +652,28 @@ async function handle(command) {
     case "prompt": {
       if (promptDumpPath) {
         writeFileSync(promptDumpPath, JSON.stringify(command), "utf8");
+      }
+      // pi runs extension commands in place: no agent run, and the prompt is
+      // answered once the handler returned (agent-session.js, 0.87).
+      const commandMatch = /^\/([^\s]+)\s*(.*)$/su.exec(command.message ?? "");
+      const extensionCommand = commandMatch ? extensionCommands.get(commandMatch[1]) : undefined;
+      if (extensionCommand) {
+        const ctx = {
+          ...extensionContext,
+          mode: "rpc",
+          hasUI: true,
+          ui: {
+            notify(message, notifyType) {
+              notifySerial += 1;
+              send({ type: "extension_ui_request", id: `notify-${notifySerial}`, method: "notify", message, notifyType });
+            },
+          },
+        };
+        try {
+          await extensionCommand.handler(commandMatch[2] ?? "", ctx);
+        } catch {}
+        respond(id, "prompt");
+        return;
       }
       if (isStreaming && command.streamingBehavior === "steer") {
         steering.push(command.message);
