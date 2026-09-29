@@ -104,7 +104,8 @@ export function formatCountdown(resetsAt: string | null, now: number): string | 
 }
 
 export function describeWindow(window: UsageWindow): string {
-  const parts = [`${window.label}: ${Math.round(window.usedPercent)}% used`];
+  const left = Math.max(0, Math.round(100 - window.usedPercent));
+  const parts = [`${window.label}: ${left}% left (${Math.round(window.usedPercent)}% used)`];
   if (window.cost !== undefined)
     parts.push(
       `$${(window.cost.usedUsdCents / 100).toFixed(2)} / $${(window.cost.limitUsdCents / 100).toFixed(2)}`,

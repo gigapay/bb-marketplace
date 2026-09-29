@@ -57,7 +57,8 @@ const BAR_CLASS = {
 } as const;
 
 function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
-  const used = Math.round(window.usedPercent);
+  // Bars show what's left, like a battery; tone still follows consumption.
+  const remaining = Math.max(0, Math.min(100, 100 - window.usedPercent));
   const tone = usageTone(window.usedPercent);
   return (
     <div
@@ -68,7 +69,7 @@ function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
       <span className="h-1.5 min-w-0 overflow-hidden rounded-full bg-sidebar-border">
         <span
           className={cn("block h-full rounded-full transition-[width] duration-300", BAR_CLASS[tone])}
-          style={{ width: `${Math.max(2, Math.min(100, window.usedPercent))}%` }}
+          style={{ width: `${remaining}%` }}
         />
       </span>
       <span
@@ -81,7 +82,7 @@ function WindowRow({ window, now }: { window: UsageWindow; now: number }) {
               : "text-sidebar-foreground",
         )}
       >
-        {used}%
+        {Math.round(remaining)}%
       </span>
       <span className="text-right tabular-nums text-subtle-foreground">
         {formatCountdown(window.resetsAt, now) ?? "—"}

@@ -1,6 +1,6 @@
 # bb-plugin-usage-bar
 
-A BB plugin that keeps your provider usage on screen. It pins a compact card above the sidebar footer icons with one block per provider (Claude Code, Codex, ...) and one bar per quota window: session (5h), weekly (7d), and model-specific windows like Fable. Each row shows the percentage used and the time until it resets. Hover a row for the full label and reset date.
+A BB plugin that keeps your provider usage on screen. It pins a compact card above the sidebar footer icons with one block per provider (Claude Code, Codex, ...) and one bar per quota window: session (5h), weekly (7d), and model-specific windows like Fable. Bars drain like a battery: each row shows the percentage left and the time until it resets. Hover a row for the full label and reset date.
 
 It's the same data as the built-in Provider usage plugin (`bb.sdk.system.usageLimits()` on the primary machine), just laid out like Orca's status bar so you don't have to click to see it.
 
