@@ -6,6 +6,7 @@
     { "name": "linear-issues", "source": "./plugins/linear-issues" },
     { "name": "usage-bar", "source": "./plugins/usage-bar" },
     { "name": "github-kit", "source": "./plugins/github-kit" },
-    { "name": "pi-provider", "source": "./plugins/pi-provider" }
+    { "name": "pi-provider", "source": "./plugins/pi-provider" },
+    { "name": "machine-stats", "source": "./plugins/machine-stats" }
   ]
 }

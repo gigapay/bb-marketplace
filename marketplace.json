@@ -96,6 +96,29 @@
           "tagPrefix": "pi-provider/"
         }
       }
+    },
+    {
+      "id": "machine-stats",
+      "displayName": "Machine Stats",
+      "description": "Live CPU, RAM and disk usage of the thread's machine in the sidebar footer.",
+      "icon": "Activity",
+      "tags": [
+        "monitoring",
+        "machines",
+        "productivity"
+      ],
+      "author": {
+        "name": "Yoann Teruel",
+        "github": "yteruel31"
+      },
+      "source": {
+        "git": {
+          "url": "https://github.com/yteruel31/bb-marketplace.git",
+          "subdir": "plugins/machine-stats",
+          "range": ">=0.1.0 <1.0.0",
+          "tagPrefix": "machine-stats/"
+        }
+      }
     }
   ]
 }
