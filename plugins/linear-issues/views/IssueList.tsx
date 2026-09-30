@@ -179,7 +179,13 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
       </div>
 
       <ErrorLine error={error} />
-      <TriageDialog open={triageOpen} onOpenChange={setTriageOpen} issues={issues ?? []} onApplied={load} />
+      <TriageDialog
+        open={triageOpen}
+        onOpenChange={setTriageOpen}
+        issues={issues ?? []}
+        linkedIdentifiers={new Set(links.byIssue.keys())}
+        onApplied={load}
+      />
 
       <div className="mt-4 space-y-4">
         {issues === null ? (

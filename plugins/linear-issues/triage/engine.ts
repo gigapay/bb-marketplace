@@ -3,8 +3,17 @@
 import type { Questions } from "@typesafe-ai/sdk";
 import {
   AREA_LABELS,
+  GAP_MISSING_BELOW,
+  INFO_GAPS,
   PRIORITY_VALUES,
+  STALE_CANCEL_SCORE,
   THRESHOLDS,
+  commitmentQuestion,
+  gapQuestion,
+  missingInfoComment,
+  speculativeQuestion,
+  staleCancelComment,
+  type InfoGap,
   TYPE_LABELS,
   areaQuestion,
   priorityQuestion,
@@ -25,18 +34,26 @@ export interface TriageIssue {
   labels: { id: string; name: string }[];
   project: { id: string; name: string } | null;
   comments: string[];
+  creatorName: string | null;
+  daysInactive: number;
+  /** Decided in code: open, inactive long enough, not in a cycle, no thread or PR. */
+  staleCandidate: boolean;
 }
 
 export interface TriageContext {
-  labels: { id: string; name: string }[];
+  labels: { id: string; name: string; color?: string }[];
   projects: { id: string; name: string; description: string | null }[];
   guidelines: string;
+  /** The team's first "canceled" workflow state, or null if it has none. */
+  canceledStateId: string | null;
 }
 
 export type TriageChange =
   | { kind: "priority"; value: number; label: string; currentLabel: string; confidence: number; preselected: boolean }
-  | { kind: "label"; labelId: string; label: string; group: "type" | "area"; confidence: number; preselected: boolean }
-  | { kind: "project"; projectId: string; label: string; confidence: number; preselected: boolean };
+  | { kind: "label"; labelId: string; label: string; color: string | null; group: "type" | "area"; confidence: number; preselected: boolean }
+  | { kind: "project"; projectId: string; label: string; confidence: number; preselected: boolean }
+  | { kind: "cancel"; stateId: string; daysInactive: number; reason: string; comment: string; confidence: number; preselected: false }
+  | { kind: "comment"; body: string; gaps: string[]; confidence: number; preselected: false };
 
 export interface TriageProposal {
   issueId: string;
@@ -108,6 +125,11 @@ export async function triageIssue(jev: JevClient, issue: TriageIssue, context: T
   for (const [name, description] of areaLabels) {
     if (!issueLabels.has(name.toLowerCase())) questions[`area_${name}`] = areaQuestion(name, description);
   }
+  for (const gap of Object.keys(INFO_GAPS) as InfoGap[]) questions[`gap_${gap}`] = gapQuestion(gap);
+  if (issue.staleCandidate && context.canceledStateId !== null) {
+    questions.commitment = commitmentQuestion();
+    questions.speculative = speculativeQuestion();
+  }
   if (askProject) {
     questions.project = projectQuestion(
       Object.fromEntries(context.projects.map((project, index) => [projectKey(index), `${project.name}${project.description ? `: ${project.description.slice(0, 300)}` : ""}`])),
@@ -140,6 +162,7 @@ export async function triageIssue(jev: JevClient, issue: TriageIssue, context: T
         kind: "label",
         labelId: label.id,
         label: label.name,
+        color: label.color ?? null,
         group: "type",
         confidence: type.confidence,
         preselected: type.confidence >= THRESHOLDS.type.preselect,
@@ -155,6 +178,7 @@ export async function triageIssue(jev: JevClient, issue: TriageIssue, context: T
       kind: "label",
       labelId: label.id,
       label: label.name,
+      color: label.color ?? null,
       group: "area",
       confidence: answer.noul,
       preselected: answer.noul >= THRESHOLDS.area.preselect,
@@ -177,12 +201,47 @@ export async function triageIssue(jev: JevClient, issue: TriageIssue, context: T
   }
 
   const readiness = answers.ready?.noul ?? null;
-  return {
-    issueId: issue.id,
-    identifier: issue.identifier,
-    title: issue.title,
-    changes,
-    readiness,
-    needsInfo: readiness !== null && readiness < THRESHOLDS.readyWarning,
-  };
+  const needsInfo = readiness !== null && readiness < THRESHOLDS.readyWarning;
+
+  // Some gaps only matter for some issues: repro steps for bugs, designs for UI work.
+  const likely = (name: string) =>
+    issueLabels.has(name.toLowerCase()) ||
+    changes.some((change) => change.kind === "label" && change.label.toLowerCase() === name.toLowerCase()) ||
+    (answers[`area_${name}`]?.noul ?? 0) >= 0.5;
+  const applies = (when: string) =>
+    when === "always" || (when === "bug" && likely("Bug")) || (when === "ui" && (likely("Frontend") || likely("Design")));
+  if (needsInfo) {
+    const gaps = (Object.keys(INFO_GAPS) as InfoGap[]).filter((gap) => {
+      const present = answers[`gap_${gap}`]?.noul;
+      return applies(INFO_GAPS[gap].when) && present !== undefined && present < GAP_MISSING_BELOW;
+    });
+    if (gaps.length > 0) {
+      changes.push({
+        kind: "comment",
+        body: missingInfoComment(issue.creatorName, gaps),
+        gaps: gaps.map((gap) => INFO_GAPS[gap].missing),
+        confidence: 1 - readiness,
+        preselected: false,
+      });
+    }
+  }
+
+  const commitment = answers.commitment?.noul;
+  const speculative = answers.speculative?.noul;
+  if (issue.staleCandidate && context.canceledStateId !== null && commitment !== undefined && speculative !== undefined) {
+    const score = speculative * (1 - commitment);
+    if (score >= STALE_CANCEL_SCORE) {
+      changes.push({
+        kind: "cancel",
+        stateId: context.canceledStateId,
+        daysInactive: issue.daysInactive,
+        reason: `No activity for ${issue.daysInactive} days · looks optional (${Math.round(speculative * 100)}%) · no commitment found (${Math.round((1 - commitment) * 100)}%)`,
+        comment: staleCancelComment(issue.daysInactive),
+        confidence: score,
+        preselected: false,
+      });
+    }
+  }
+
+  return { issueId: issue.id, identifier: issue.identifier, title: issue.title, changes, readiness, needsInfo };
 }

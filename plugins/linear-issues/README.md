@@ -52,9 +52,11 @@ Jev doesn't write text. It answers typed questions with probabilities, so triage
 - Type label: a `choice` among Bug, Improvement, Feature, Refactor and Maintenance. It's only asked when the issue has none of them.
 - Area labels: one `noul` per area (Backend, Frontend, Devops, Design, Security, Data), so several can apply.
 - Project: a `choice` among the team's active projects plus `none`. It's only asked when the issue has no project.
-- Readiness: a `noul` "could an engineer start today?". A low value flags "Needs more info" in the review and changes nothing.
+- Readiness: a `noul` "could an engineer start today?". A low value flags "Needs more info".
+- Missing information: one `noul` per gap (goal, expected behaviour, acceptance criteria, plus repro steps for bugs and designs for UI work). When an issue needs more info, the review proposes a comment that lists exactly what's missing, addressed to the creator and editable before posting. "Enrich with an agent" opens the composer with a prompt for an agent to research the code and draft a better description, without touching Linear.
+- Stale tickets: code first picks candidates. Those are open issues with no update or comment for `staleAfterDays` (setting, default 90), not urgent, not in an active cycle, with no BB thread and no GitHub or GitLab attachment. For those only, Jev answers "is this optional?" and "does it carry a commitment?". When optional × (1 − commitment) ≥ 0.4, the review proposes Cancel (the team's first canceled state), plus a closing comment. Cancel is never pre-checked.
 
-Only labels that exist in the workspace are asked about. `triage/engine.ts` turns the answers into proposals. A proposal below the `propose` threshold is dropped, and one above `preselect` is pre-checked. The review dialog (`views/Triage.tsx`) lists them per issue with their confidence. Only the checked changes are applied, through `issueUpdate`. Labels are added with `addedLabelIds` and never removed. The optional `triageGuidelines` setting passes team conventions to every request.
+Only labels that exist in the workspace are asked about. `triage/engine.ts` turns the answers into proposals. A proposal below the `propose` threshold is dropped, and one above `preselect` is pre-checked. The review dialog (`views/Triage.tsx`) lists them per issue with their confidence. Rows are colour-coded by kind: amber for priority, the label's own Linear colour, violet for project, blue for comment, red for cancel. Confidence is green, amber or grey. Only the checked changes are applied, through `issueUpdate`, then `commentCreate` for comments. Labels are added with `addedLabelIds` and never removed. The optional `triageGuidelines` setting passes team conventions to every request.
 
 ## Comments
 

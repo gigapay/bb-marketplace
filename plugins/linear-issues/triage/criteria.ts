@@ -104,3 +104,61 @@ export function readinessQuestion() {
     },
   );
 }
+
+// ---------------------------------------------------------------- stale tickets
+// Code picks candidates (open, inactive for `staleAfterDays`, not in an active
+// cycle, no linked BB thread, no PR). Jev only judges what code can't see.
+
+/** Cancel is proposed when speculative × (1 − commitment) reaches this. Never pre-checked. */
+export const STALE_CANCEL_SCORE = 0.4;
+
+export function commitmentQuestion() {
+  return noul(
+    {
+      question: "Does `issue` reference a commitment: a named customer, a deadline, a contractual or compliance obligation, an incident, or a request from leadership?",
+      rules: SHARED,
+    },
+    { true: "Someone depends on this getting done.", false: "Nothing in the issue ties it to a customer, deadline or obligation." },
+  );
+}
+
+export function speculativeQuestion() {
+  return noul(
+    { question: "Is `issue` an idea, nice-to-have or exploration rather than agreed, committed work?", rules: SHARED },
+    { true: "Optional or exploratory; the product would be fine without it.", false: "Agreed work the team intends to do." },
+  );
+}
+
+// ------------------------------------------------------------- missing information
+// Each gap is its own yes/no so the comment can say exactly what's missing.
+// `when` limits a question to issues where that gap matters.
+
+export const INFO_GAPS = {
+  goal: { ask: "Does `issue` clearly state the problem to solve or the goal?", missing: "What problem this solves, or the goal", when: "always" },
+  expected: { ask: "Does `issue` describe the expected behaviour or outcome once done?", missing: "The expected behaviour or outcome", when: "always" },
+  acceptance: { ask: "Does `issue` define acceptance criteria or a clear definition of done?", missing: "Acceptance criteria (how we know it's done)", when: "always" },
+  repro: { ask: "Does `issue` include steps to reproduce the bug (where, as whom, what happened)?", missing: "Steps to reproduce, with the account or environment", when: "bug" },
+  design: { ask: "Does `issue` include designs, mockups, screenshots or a precise UI spec?", missing: "Designs or screenshots for the UI change", when: "ui" },
+} as const;
+export type InfoGap = keyof typeof INFO_GAPS;
+
+/** A gap counts as missing below this probability of "present". */
+export const GAP_MISSING_BELOW = 0.4;
+
+export function gapQuestion(gap: InfoGap) {
+  return noul({ question: INFO_GAPS[gap].ask, rules: SHARED }, { true: "Present and usable.", false: "Missing or too vague to act on." });
+}
+
+/** The comment posted for missing information; editable in the review. */
+export function missingInfoComment(creatorName: string | null, gaps: InfoGap[]): string {
+  const greeting = creatorName ? `Hi ${creatorName.split(" ")[0]}, to` : "To";
+  return [
+    `${greeting} be able to pick this up, could you add:`,
+    "",
+    ...gaps.map((gap) => `- ${INFO_GAPS[gap].missing}`),
+  ].join("\n");
+}
+
+export function staleCancelComment(daysInactive: number): string {
+  return `Closing this as it's had no activity for ${daysInactive} days. Reopen it if it's still relevant.`;
+}

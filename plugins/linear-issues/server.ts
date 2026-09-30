@@ -98,8 +98,10 @@ export type StoredLink = z.infer<typeof storedLinkSchema>;
 
 const triageChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("priority"), value: z.number(), label: z.string(), currentLabel: z.string(), confidence: z.number(), preselected: z.boolean() }),
-  z.object({ kind: z.literal("label"), labelId: z.string(), label: z.string(), group: z.enum(["type", "area"]), confidence: z.number(), preselected: z.boolean() }),
+  z.object({ kind: z.literal("label"), labelId: z.string(), label: z.string(), color: z.string().nullable(), group: z.enum(["type", "area"]), confidence: z.number(), preselected: z.boolean() }),
   z.object({ kind: z.literal("project"), projectId: z.string(), label: z.string(), confidence: z.number(), preselected: z.boolean() }),
+  z.object({ kind: z.literal("cancel"), stateId: z.string(), daysInactive: z.number(), reason: z.string(), comment: z.string(), confidence: z.number(), preselected: z.literal(false) }),
+  z.object({ kind: z.literal("comment"), body: z.string(), gaps: z.array(z.string()), confidence: z.number(), preselected: z.literal(false) }),
 ]);
 const triageProposalSchema = z.object({
   issueId: z.string(),
@@ -153,7 +155,13 @@ export const rpcContract = defineRpcContract({
   },
   // Asks Jev about each issue; read-only, nothing is written to Linear.
   triage_run: {
-    input: z.object({ issueIds: z.array(z.string().min(1).max(100)).min(1).max(50) }).strict(),
+    input: z
+      .object({
+        issueIds: z.array(z.string().min(1).max(100)).min(1).max(50),
+        // Issues with a BB thread (the UI knows branch links too); never stale.
+        linkedIssueIds: z.array(z.string().min(1).max(100)).max(500),
+      })
+      .strict(),
     output: z.object({ proposals: z.array(triageProposalSchema) }),
   },
   // Applies only the changes the user kept in the review.
@@ -168,6 +176,9 @@ export const rpcContract = defineRpcContract({
                 priority: z.number().int().min(0).max(4).optional(),
                 addedLabelIds: z.array(z.string().min(1).max(100)).max(20).optional(),
                 projectId: z.string().min(1).max(100).optional(),
+                stateId: z.string().min(1).max(100).optional(),
+                // Posted after the update: the missing-info ask or the cancel note.
+                comments: z.array(z.string().trim().min(1).max(10_000)).max(2).optional(),
               })
               .strict(),
           )
@@ -364,6 +375,13 @@ export default async function plugin(bb: BbPluginApi) {
       label: "OpenRouter API key (Jev triage)",
       description: "Used to ask TypeSafe's Jev model to triage tickets. Issue text is sent to OpenRouter/TypeSafe, and OpenRouter bills the usage.",
       secret: true,
+    },
+    staleAfterDays: {
+      type: "number",
+      label: "Stale after (days)",
+      description: "Open tickets with no update or comment for this long become candidates for cancellation in Jev triage.",
+      default: 90,
+      experimental_schema: z.number().int().min(14).max(730),
     },
     triageGuidelines: {
       type: "string",
@@ -681,13 +699,16 @@ export default async function plugin(bb: BbPluginApi) {
       const { openRouterApiKey } = await settings.get();
       return { configured: typeof openRouterApiKey === "string" && openRouterApiKey.trim() !== "" };
     },
-    triage_run: async ({ issueIds }) => {
-      const { openRouterApiKey, triageGuidelines } = await settings.get();
+    triage_run: async ({ issueIds, linkedIssueIds }) => {
+      const { openRouterApiKey, triageGuidelines, staleAfterDays } = await settings.get();
       if (typeof openRouterApiKey !== "string" || openRouterApiKey.trim() === "") {
         throw new Error("Set the OpenRouter API key in the plugin settings to triage with Jev.");
       }
       const jev = openRouterJev(openRouterApiKey.trim());
-      const loaded = await loadTriageIssues(linear, [...new Set(issueIds)]);
+      const loaded = await loadTriageIssues(linear, [...new Set(issueIds)], {
+        staleAfterDays,
+        linkedIssueIds: new Set(linkedIssueIds),
+      });
       const contexts = new Map<string, Promise<TriageContext>>();
       const contextFor = (teamId: string) => {
         if (!contexts.has(teamId)) contexts.set(teamId, loadTriageContext(linear, teamId, triageGuidelines));
@@ -723,9 +744,12 @@ export default async function plugin(bb: BbPluginApi) {
     },
     triage_apply: async ({ updates }) => {
       const results = [];
-      for (const { issueId, ...update } of updates) {
+      for (const { issueId, comments, ...update } of updates) {
         try {
-          await applyIssueUpdate(linear, issueId, update);
+          if (Object.keys(update).length > 0) await applyIssueUpdate(linear, issueId, update);
+          for (const body of comments ?? []) {
+            await linear(COMMENT_CREATE_MUTATION, { input: { issueId, body } });
+          }
           results.push({ issueId, error: null });
         } catch (cause) {
           results.push({ issueId, error: errorMessage(cause) });

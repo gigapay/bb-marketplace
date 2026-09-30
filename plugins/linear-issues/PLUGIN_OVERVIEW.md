@@ -16,7 +16,7 @@ The plugin adds a "Linear worktree" environment. It branches off the project's p
 
 ## Triage with Jev
 
-"Triage with Jev" asks TypeSafe's Jev model to suggest a priority, type and area labels, and a project for every issue in your current list, and flags tickets that need more information. You review each suggestion with its confidence and apply only the ones you keep. Nothing changes in Linear before that. It needs an OpenRouter API key. Issue text is sent to OpenRouter and TypeSafe, and OpenRouter bills the usage.
+"Triage with Jev" asks TypeSafe's Jev model to suggest a priority, type and area labels, and a project for every issue in your current list, flags tickets that need more information (with a ready-to-post comment listing what's missing, or an agent to draft it), and spots stale tickets that could be cancelled. You review each suggestion with its confidence and apply only the ones you keep. Nothing changes in Linear before that. It needs an OpenRouter API key. Issue text is sent to OpenRouter and TypeSafe, and OpenRouter bills the usage.
 
 ## How linking works
 
