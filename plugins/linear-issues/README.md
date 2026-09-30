@@ -44,7 +44,7 @@ Linear serves pasted images and attachments from `uploads.linear.app` only when 
 
 ## Triage with Jev
 
-"Triage with Jev" in the Linear page asks TypeSafe's Jev model about every issue in the current list (up to 50). It uses the official `@typesafe-ai/sdk`, pointed at OpenRouter (`openRouterApiKey` setting) with a small fetch shim, because OpenRouter serves the same System One protocol at `/api/alpha/decisions`.
+"Triage with Jev" in the Linear page (and in a project's Issues tab, scoped to the milestone shown) asks TypeSafe's Jev model about every issue in the current list (up to 50). It uses the official `@typesafe-ai/sdk`, pointed at OpenRouter (`openRouterApiKey` setting) with a small fetch shim, because OpenRouter serves the same System One protocol at `/api/alpha/decisions`.
 
 Jev doesn't write text. It answers typed questions with probabilities, so triage is a set of narrow questions per issue, all in one request. They're defined, with their thresholds, in `triage/criteria.ts`:
 

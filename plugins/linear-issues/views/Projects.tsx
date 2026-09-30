@@ -11,6 +11,7 @@ import type { IssueSummary, rpcContract } from "../server";
 import { IssueGroups } from "./IssueList";
 import { useIssueLinks } from "./links";
 import { UpdateComposer } from "./UpdateComposer";
+import { TriageDialog } from "./Triage";
 import { EmptyState, ErrorLine, errorText, relativeTime } from "./shared";
 
 // Linear's own order for project statuses.
@@ -176,6 +177,7 @@ export function ProjectDetailView({
   const [includeCompleted, setIncludeCompleted] = useState(false);
   // null = every issue; "none" = issues outside any milestone.
   const [milestoneId, setMilestoneId] = useState<string | null>(null);
+  const [triageOpen, setTriageOpen] = useState(false);
 
   const openMilestone = (id: string) => {
     setMilestoneId(id);
@@ -219,6 +221,15 @@ export function ProjectDetailView({
     };
   }, [rpc, projectId, includeCompleted]);
   useEffect(() => loadIssues(), [loadIssues]);
+
+  // What the Issues tab shows, and what its triage button works on.
+  const visibleIssues = useMemo(
+    () =>
+      (issues ?? []).filter((issue) =>
+        milestoneId === null ? true : milestoneId === "none" ? issue.milestone === null : issue.milestone?.id === milestoneId,
+      ),
+    [issues, milestoneId],
+  );
 
   return (
     <div>
@@ -360,10 +371,29 @@ export function ProjectDetailView({
               </div>
             ) : (
               <div>
-                <label className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
-                  <Checkbox checked={includeCompleted} onCheckedChange={(checked) => setIncludeCompleted(checked === true)} />
-                  Show done
-                </label>
+                <div className="mb-3 flex flex-wrap items-center gap-3">
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Checkbox checked={includeCompleted} onCheckedChange={(checked) => setIncludeCompleted(checked === true)} />
+                    Show done
+                  </label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-auto"
+                    onClick={() => setTriageOpen(true)}
+                    disabled={visibleIssues.length === 0}
+                  >
+                    <Icon name="linear-issues/linear" className="size-3.5 text-[#5E6AD2]" />
+                    Triage with Jev
+                  </Button>
+                </div>
+                <TriageDialog
+                  open={triageOpen}
+                  onOpenChange={setTriageOpen}
+                  issues={visibleIssues}
+                  linkedIdentifiers={new Set(links.byIssue.keys())}
+                  onApplied={loadIssues}
+                />
                 {issues !== null && project.milestones.length > 0 ? (
                   <MilestoneChips
                     milestones={project.milestones}
@@ -377,13 +407,7 @@ export function ProjectDetailView({
                   <EmptyState>Loading issues…</EmptyState>
                 ) : (
                   <IssueGroups
-                    issues={issues.filter((issue) =>
-                      milestoneId === null
-                        ? true
-                        : milestoneId === "none"
-                          ? issue.milestone === null
-                          : issue.milestone?.id === milestoneId,
-                    )}
+                    issues={visibleIssues}
                     threadCount={(identifier) => links.byIssue.get(identifier)?.length ?? 0}
                     onOpen={onOpenIssue}
                     emptyLabel={milestoneId === null ? "No issues in this project." : "No issues in this milestone."}
