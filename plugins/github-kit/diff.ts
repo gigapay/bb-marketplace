@@ -40,6 +40,9 @@ export const prDiffSchema = z.object({
   files: z.array(diffFileSchema),
   // True when GitHub's file list or our size budget cut something.
   truncated: z.boolean(),
+  // Files touched since your latest review (full diff only), for the
+  // "updated since review" marker.
+  changedSinceReview: z.array(z.string()),
 });
 export type PrDiff = z.infer<typeof prDiffSchema>;
 

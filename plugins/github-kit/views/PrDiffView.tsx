@@ -39,6 +39,10 @@ function fileId(path: string): string {
   return `github-kit-file-${encodeURIComponent(path)}`;
 }
 
+// Linear's palette: indigo for reviewed, orange for changed since your review.
+const REVIEWED_CLASS = "text-indigo-400";
+const UPDATED_DOT_CLASS = "bg-orange-400";
+
 function splitPath(path: string): { name: string; dir: string } {
   const index = path.lastIndexOf("/");
   return index === -1 ? { name: path, dir: "" } : { name: path.slice(index + 1), dir: path.slice(0, index + 1) };
@@ -108,6 +112,11 @@ export function PrDiffView({
     null;
   // Line comments anchor on the head commit, so only the full diff takes them.
   const canComment = range.kind === "all" && pr.state === "OPEN";
+
+  // Changed after you reviewed it: GitHub un-views a file that moves after
+  // you ticked it (DISMISSED), and your last review's compare covers the rest.
+  const changedSinceReview = useMemo(() => new Set(diff?.changedSinceReview ?? []), [diff]);
+  const isUpdated = (file: DiffFile) => !isViewed(file) && (file.viewed === "DISMISSED" || changedSinceReview.has(file.path));
 
   const isViewed = (file: DiffFile) => viewedOverride.get(file.path) ?? file.viewed === "VIEWED";
   const isExpanded = (file: DiffFile) => expandedOverride.get(file.path) ?? !isViewed(file);
@@ -269,14 +278,24 @@ export function PrDiffView({
                               title={file.path}
                               className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-sm hover:bg-accent/50"
                             >
-                              <span className={cn("shrink-0 truncate", file.status === "added" && "text-[#1f883d]", file.status === "removed" && "text-destructive line-through")}>
+                              <span
+                                className={cn(
+                                  "shrink-0 truncate text-foreground",
+                                  file.status === "added" && "text-[#3fb950]",
+                                  file.status === "removed" && "text-destructive line-through",
+                                )}
+                              >
                                 {name}
                               </span>
-                              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{dir}</span>
+                              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">{dir}</span>
                               {openThreadPaths.has(file.path) ? (
-                                <span aria-label="Has open comments" className="size-1.5 shrink-0 rounded-full bg-[#fb8500]" />
+                                <Icon name="MessageSquare" aria-label="Has open comments" className="size-3 shrink-0 text-muted-foreground" />
                               ) : null}
-                              {isViewed(file) ? <Icon name="Check" className="size-3.5 shrink-0 text-primary" /> : null}
+                              {isViewed(file) ? (
+                                <Icon name="Check" aria-label="Reviewed" className={cn("size-3.5 shrink-0", REVIEWED_CLASS)} />
+                              ) : isUpdated(file) ? (
+                                <span aria-label="Updated since your review" title="Updated since your review" className={cn("mx-1 size-1.5 shrink-0 rounded-full", UPDATED_DOT_CLASS)} />
+                              ) : null}
                             </button>
                           </li>
                         );
@@ -298,6 +317,7 @@ export function PrDiffView({
                 prKey={pr.key}
                 threadId={threadId}
                 viewed={isViewed(file)}
+                updated={isUpdated(file)}
                 expanded={isExpanded(file)}
                 threads={threadsByPath.get(file.path) ?? []}
                 view={view}
@@ -320,6 +340,7 @@ function FileCard({
   prKey,
   threadId,
   viewed,
+  updated,
   expanded,
   threads,
   view,
@@ -334,6 +355,7 @@ function FileCard({
   prKey: string;
   threadId: string | null;
   viewed: boolean;
+  updated: boolean;
   expanded: boolean;
   threads: FeedItem[];
   view: "unified" | "split";
@@ -350,12 +372,26 @@ function FileCard({
           <Icon name="ChevronRight" className={cn("size-4 transition-transform", expanded && "rotate-90")} />
         </button>
         <button type="button" onClick={onToggle} className="flex min-w-0 flex-1 items-baseline gap-2 text-left">
-          <span className={cn("shrink-0 font-medium", file.status === "added" && "text-[#1f883d]", file.status === "removed" && "text-destructive")}>{name}</span>
-          <span className="min-w-0 truncate text-xs text-muted-foreground">
+          <span
+            className={cn(
+              "shrink-0 font-medium text-foreground",
+              file.status === "added" && "text-[#3fb950]",
+              file.status === "removed" && "text-destructive",
+            )}
+          >
+            {name}
+          </span>
+          <span className="min-w-0 truncate text-xs text-muted-foreground/70">
             {file.previousPath && file.previousPath !== file.path ? `${file.previousPath} → ` : ""}
             {dir}
           </span>
         </button>
+        {updated ? (
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-orange-400">
+            <span aria-hidden className={cn("size-1.5 rounded-full", UPDATED_DOT_CLASS)} />
+            Updated since review
+          </span>
+        ) : null}
         {threads.length > 0 ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
             <Icon name="MessageSquare" className="size-3.5" />
@@ -366,8 +402,12 @@ function FileCard({
           {file.additions > 0 ? <span className="text-[#1f883d]">+{file.additions}</span> : null}{" "}
           {file.deletions > 0 ? <span className="text-destructive">−{file.deletions}</span> : null}
         </span>
-        <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-          <Checkbox checked={viewed} onCheckedChange={(checked) => onViewed(checked === true)} />
+        <label className={cn("flex shrink-0 items-center gap-1.5 text-xs", viewed ? REVIEWED_CLASS : "text-muted-foreground")}>
+          <Checkbox
+            checked={viewed}
+            onCheckedChange={(checked) => onViewed(checked === true)}
+            className="data-[state=checked]:border-indigo-500 data-[state=checked]:bg-indigo-500"
+          />
           Reviewed
         </label>
         <UrlLink href={`${prUrl}/files`} target="_blank" aria-label="Open on GitHub" className="shrink-0 text-muted-foreground hover:text-foreground">

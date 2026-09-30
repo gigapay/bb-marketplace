@@ -409,7 +409,20 @@ export default async function plugin(bb: BbPluginApi) {
       if (range.kind === "since-review") files = files.filter((file) => meta.viewed.has(file.filename));
     }
     const { files: diffFiles, cut } = toDiffFiles(files, meta.viewed);
-    return { headSha: meta.headSha, lastReviewSha: meta.lastReviewSha, commits: meta.commits, files: diffFiles, truncated: truncated || cut };
+    let changedSinceReview: string[] = [];
+    if (range.kind === "all" && meta.lastReviewSha !== null && meta.lastReviewSha !== meta.headSha) {
+      // Names only matter here; a failure just hides the marker.
+      const compare = await githubGet<{ files?: { filename: string }[] }>(`${repo}/compare/${meta.lastReviewSha}...${meta.headSha}`).catch(() => null);
+      changedSinceReview = (compare?.files ?? []).map((file) => file.filename).filter((path) => meta.viewed.has(path));
+    }
+    return {
+      headSha: meta.headSha,
+      lastReviewSha: meta.lastReviewSha,
+      commits: meta.commits,
+      files: diffFiles,
+      truncated: truncated || cut,
+      changedSinceReview,
+    };
   }
 
   async function getPullRequest(ref: PrRef): Promise<PrDetail> {
