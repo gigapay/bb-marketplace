@@ -1,9 +1,9 @@
 {
   "$schema": "https://getbb.app/schemas/marketplace.schema.json",
   "schemaVersion": 1,
-  "name": "yteruel31",
-  "displayName": "Yoann's BB plugins",
-  "description": "Personal BB plugins maintained by Yoann Teruel.",
+  "name": "gigapay",
+  "displayName": "Gigapay BB plugins",
+  "description": "BB plugins maintained by the Gigapay team.",
   "plugins": [
     {
       "id": "linear-issues",
@@ -16,12 +16,12 @@
         "productivity"
       ],
       "author": {
-        "name": "Yoann Teruel",
-        "github": "yteruel31"
+        "name": "Gigapay",
+        "github": "gigapay"
       },
       "source": {
         "git": {
-          "url": "https://github.com/yteruel31/bb-marketplace.git",
+          "url": "https://github.com/gigapay/bb-marketplace.git",
           "subdir": "plugins/linear-issues",
           "range": ">=0.1.0 <1.0.0",
           "tagPrefix": "linear-issues/"
@@ -39,12 +39,12 @@
         "productivity"
       ],
       "author": {
-        "name": "Yoann Teruel",
-        "github": "yteruel31"
+        "name": "Gigapay",
+        "github": "gigapay"
       },
       "source": {
         "git": {
-          "url": "https://github.com/yteruel31/bb-marketplace.git",
+          "url": "https://github.com/gigapay/bb-marketplace.git",
           "subdir": "plugins/usage-bar",
           "range": ">=0.1.0 <1.0.0",
           "tagPrefix": "usage-bar/"
@@ -62,12 +62,12 @@
         "productivity"
       ],
       "author": {
-        "name": "Yoann Teruel",
-        "github": "yteruel31"
+        "name": "Gigapay",
+        "github": "gigapay"
       },
       "source": {
         "git": {
-          "url": "https://github.com/yteruel31/bb-marketplace.git",
+          "url": "https://github.com/gigapay/bb-marketplace.git",
           "subdir": "plugins/github-kit",
           "range": ">=0.1.0 <1.0.0",
           "tagPrefix": "github-kit/"
@@ -85,12 +85,12 @@
         "agents"
       ],
       "author": {
-        "name": "Yoann Teruel",
-        "github": "yteruel31"
+        "name": "Gigapay",
+        "github": "gigapay"
       },
       "source": {
         "git": {
-          "url": "https://github.com/yteruel31/bb-marketplace.git",
+          "url": "https://github.com/gigapay/bb-marketplace.git",
           "subdir": "plugins/pi-provider",
           "range": ">=0.1.0 <1.0.0",
           "tagPrefix": "pi-provider/"
@@ -108,12 +108,12 @@
         "productivity"
       ],
       "author": {
-        "name": "Yoann Teruel",
-        "github": "yteruel31"
+        "name": "Gigapay",
+        "github": "gigapay"
       },
       "source": {
         "git": {
-          "url": "https://github.com/yteruel31/bb-marketplace.git",
+          "url": "https://github.com/gigapay/bb-marketplace.git",
           "subdir": "plugins/machine-stats",
           "range": ">=0.1.0 <1.0.0",
           "tagPrefix": "machine-stats/"
@@ -131,12 +131,12 @@
         "staging"
       ],
       "author": {
-        "name": "Yoann Teruel",
-        "github": "yteruel31"
+        "name": "Gigapay",
+        "github": "gigapay"
       },
       "source": {
         "git": {
-          "url": "https://github.com/yteruel31/bb-marketplace.git",
+          "url": "https://github.com/gigapay/bb-marketplace.git",
           "subdir": "plugins/traefik-stacks",
           "range": ">=0.1.0 <1.0.0",
           "tagPrefix": "traefik-stacks/"

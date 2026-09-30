@@ -151,7 +151,7 @@ Managed installs need the plugin on a git ref the bb server can fetch, so this n
 
 1. Pick a quiet moment: no Pi turn running. The switch unloads the bundled provider, and open Pi threads show "provider unavailable" until this one is enabled.
 2. `bb plugin disable provider-pi`. This is reversible, and keeps its settings. `bb plugin uninstall provider-pi` also deletes its settings, and a bundled plugin may come back with a bb update.
-3. Install this plugin, either from a pushed branch: `bb plugin install git:github.com/yteruel31/bb-marketplace@<branch> --plugin pi-provider`, or from the marketplace once tagged: `bb plugin install pi-provider@yteruel31`.
+3. Install this plugin, either from a pushed branch: `bb plugin install git:github.com/gigapay/bb-marketplace@<branch> --plugin pi-provider`, or from the marketplace once tagged: `bb plugin install pi-provider@gigapay`.
 4. `bb plugin list` should show `pi-provider` running. Then check it in a Pi thread:
    - The `/` menu lists `/reload` and Pi package skills (e.g. `gig-plan`, Claude marketplace `claude-*` skills).
    - Ask Pi to spawn a pi-toolbox subagent with a name. A background agent row appears under the `subagent_spawn` call, stays live after the reply, and settles when the run ends.
