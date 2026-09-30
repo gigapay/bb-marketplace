@@ -1,8 +1,9 @@
-import { useEffect, useId, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useId, type ReactNode } from "react";
 import { experimental_ProviderIcon as ProviderIcon, useSdk } from "@get-bb/plugin-sdk/app";
 import { cn } from "@/lib/utils";
-import { getUsageSnapshot, refreshUsage, shortWindowLabel, subscribeUsage } from "./usage";
-import { windowKey } from "./prefs";
+import { refreshUsage, shortWindowLabel, useUsageSnapshot } from "./usage";
+import { PRIMARY_MACHINE, THREAD_MACHINE, windowKey } from "./prefs";
+import { useMachines, useUsageMachine } from "./machines";
 import { toggleIn, usePrefs } from "./use-prefs";
 import { useUsageRows } from "./rows";
 
@@ -40,18 +41,71 @@ function Toggle({
   );
 }
 
+function MachinePicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (machine: string) => void;
+}) {
+  const id = useId();
+  const machines = useMachines();
+  const primary = machines?.find((machine) => machine.primary);
+  const known =
+    value === PRIMARY_MACHINE ||
+    value === THREAD_MACHINE ||
+    machines === null ||
+    machines.some((machine) => machine.id === value);
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="text-sm text-foreground">
+        Machine
+      </label>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-8 w-full max-w-sm rounded-md border border-border bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <option value={PRIMARY_MACHINE}>
+          Primary machine{primary === undefined ? "" : ` (${primary.name})`}
+        </option>
+        <option value={THREAD_MACHINE}>Machine of the open thread</option>
+        {(machines ?? [])
+          .filter((machine) => !machine.primary)
+          .map((machine) => (
+            <option key={machine.id} value={machine.id}>
+              {machine.name}
+              {machine.connected ? "" : " (offline)"}
+            </option>
+          ))}
+        {known ? null : <option value={value}>Removed machine</option>}
+      </select>
+      <span className="text-xs text-muted-foreground">
+        Each machine has its own provider logins, so usage can differ between them. "Open thread" falls back to the primary machine when no thread is open.
+      </span>
+    </div>
+  );
+}
+
 export function UsageSettings() {
   const sdk = useSdk();
-  const snapshot = useSyncExternalStore(subscribeUsage, getUsageSnapshot, getUsageSnapshot);
-  const rows = useUsageRows(snapshot.data);
   const [prefs, update] = usePrefs();
+  const { hostId } = useUsageMachine(prefs);
+  const snapshot = useUsageSnapshot(hostId);
+  const rows = useUsageRows(snapshot.data);
 
   useEffect(() => {
-    void refreshUsage(sdk, 60_000);
-  }, [sdk]);
+    void refreshUsage(sdk, 60_000, hostId);
+  }, [sdk, hostId]);
 
   return (
     <div className="flex flex-col gap-5">
+      <MachinePicker
+        value={prefs.machine}
+        onChange={(machine) => update((current) => ({ ...current, machine }))}
+      />
+
       <div className="flex flex-col gap-3">
         <Toggle
           checked={prefs.compact}
@@ -139,7 +193,7 @@ export function UsageSettings() {
           </ul>
         )}
         <p className="text-xs text-muted-foreground">
-          Gauges only appear here once the provider has reported them. Settings sync across your BB windows.
+          Lists the providers of the machine picked above. Gauges only appear once the provider has reported them. Settings sync across your BB windows.
         </p>
       </div>
     </div>

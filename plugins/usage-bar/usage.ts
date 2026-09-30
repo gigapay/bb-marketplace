@@ -1,3 +1,4 @@
+import { useCallback, useSyncExternalStore } from "react";
 import type { PluginBrowserBbSdk } from "@get-bb/plugin-sdk/app";
 
 export type UsageLimits = Awaited<
@@ -14,56 +15,65 @@ export interface UsageSnapshot {
   loadedAt: number | null;
 }
 
-let snapshot: UsageSnapshot = {
-  data: null,
-  error: null,
-  refreshing: false,
-  loadedAt: null,
-};
-const listeners = new Set<() => void>();
-let inFlight: Promise<void> | null = null;
+const EMPTY: UsageSnapshot = { data: null, error: null, refreshing: false, loadedAt: null };
+const PRIMARY = "";
 
-function update(next: Partial<UsageSnapshot>): void {
-  snapshot = { ...snapshot, ...next };
+// One cache per machine so switching machines never shows another machine's numbers.
+const snapshots = new Map<string, UsageSnapshot>();
+const inFlight = new Map<string, Promise<void>>();
+const listeners = new Set<() => void>();
+
+function update(key: string, next: Partial<UsageSnapshot>): void {
+  snapshots.set(key, { ...(snapshots.get(key) ?? EMPTY), ...next });
   for (const listener of listeners) listener();
 }
 
-export function subscribeUsage(listener: () => void): () => void {
+/** `hostId` null means BB's primary machine. */
+export function useUsageSnapshot(hostId: string | null): UsageSnapshot {
+  const key = hostId ?? PRIMARY;
+  const get = useCallback(() => snapshots.get(key) ?? EMPTY, [key]);
+  return useSyncExternalStore(subscribe, get, get);
+}
+
+function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
-export function getUsageSnapshot(): UsageSnapshot {
-  return snapshot;
-}
-
 /**
  * Every call hits the provider bridges (no server-side cache), so callers pass
- * `maxAgeMs` and concurrent calls share one request.
+ * `maxAgeMs` and concurrent calls for one machine share a request.
  */
 export function refreshUsage(
   sdk: PluginBrowserBbSdk,
   maxAgeMs: number,
+  hostId: string | null,
 ): Promise<void> {
-  if (inFlight !== null) return inFlight;
-  if (snapshot.loadedAt !== null && Date.now() - snapshot.loadedAt < maxAgeMs)
-    return Promise.resolve();
-  update({ refreshing: true });
-  inFlight = sdk.system
-    .usageLimits({ signal: AbortSignal.timeout(60_000) })
+  const key = hostId ?? PRIMARY;
+  const running = inFlight.get(key);
+  if (running !== undefined) return running;
+  const loadedAt = snapshots.get(key)?.loadedAt ?? null;
+  if (loadedAt !== null && Date.now() - loadedAt < maxAgeMs) return Promise.resolve();
+  update(key, { refreshing: true });
+  const request = sdk.system
+    .usageLimits({
+      ...(hostId === null ? {} : { hostId }),
+      signal: AbortSignal.timeout(60_000),
+    })
     .then(
-      (data) => update({ data, error: null, loadedAt: Date.now() }),
+      (data) => update(key, { data, error: null, loadedAt: Date.now() }),
       (cause: unknown) => {
         console.warn("[usage-bar] usage refresh failed", cause);
         // Keep the last good data on screen; only flag the failure.
-        update({ error: "Couldn’t refresh usage." });
+        update(key, { error: "Couldn’t refresh usage." });
       },
     )
     .finally(() => {
-      inFlight = null;
-      update({ refreshing: false });
+      inFlight.delete(key);
+      update(key, { refreshing: false });
     });
-  return inFlight;
+  inFlight.set(key, request);
+  return request;
 }
 
 /** Short column label: "5h", "7d", "1d", or the provider's own label (e.g. a model family). */

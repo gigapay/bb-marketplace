@@ -8,6 +8,7 @@ const prefsSchema = z.object({
   hideSignedOut: z.boolean(),
   hiddenProviders: z.array(z.string().min(1).max(200)).max(200),
   hiddenWindows: z.array(z.string().min(1).max(400)).max(500),
+  machine: z.string().min(1).max(200),
 }) satisfies z.ZodType<UsagePrefs>;
 
 // Usage itself is read in the app bundle (bb.sdk.system.usageLimits()); the

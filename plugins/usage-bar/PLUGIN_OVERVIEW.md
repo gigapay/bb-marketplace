@@ -9,4 +9,4 @@ Keep an eye on your Claude Code and Codex quotas without clicking anything.
 
 ## How it works
 
-The card reads the same host-local usage BB's own Provider usage plugin shows, on the primary machine. It refreshes every couple of minutes, on focus, and right after a thread finishes a turn. Click the footer icon to hide or re-pin it.
+The card reads the same host-local usage BB's own Provider usage plugin shows, on the machine you pick: the primary one, the one running the open thread, or any other. It refreshes every couple of minutes, on focus, and right after a thread finishes a turn. Click the footer icon to hide or re-pin it.

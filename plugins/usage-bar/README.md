@@ -2,7 +2,7 @@
 
 A BB plugin that keeps your provider usage on screen. It pins a compact card above the sidebar footer icons: each provider (Claude Code, Codex, ...) is just its icon, next to one bar per quota window: session (5h), weekly (7d), and model-specific windows like Fable. Bars drain like a battery: each row shows the percentage left and the time until it resets. Hover a row for the full label and reset date, or the icon for the provider name and plan.
 
-It's the same data as the built-in Provider usage plugin (`bb.sdk.system.usageLimits()` on the primary machine), just laid out like Orca's status bar so you don't have to click to see it.
+It's the same data as the built-in Provider usage plugin (`bb.sdk.system.usageLimits()` on the machine you pick), just laid out like Orca's status bar so you don't have to click to see it.
 
 ## How it stays visible
 
@@ -16,6 +16,7 @@ BB's sidebar footer only offers click-to-open disclosures, so the plugin opens i
 
 Settings → Plugins → Usage Bar → Display, or the sliders button in the card. Prefs are stored on the BB server, so every window and device agrees.
 
+- Machine: the primary machine (default), the machine of the thread you have open, or a specific machine. Each machine has its own provider logins, so usage can differ. When it isn't the primary one, the card names the machine in its status line.
 - Compact mode: one line per provider with small bars and the percentage left. Hover a bar for the window name and reset time. The refresh and settings buttons show on hover.
 - Hide providers you're not signed in to (on by default): drops tools that are installed but have no account, like an OpenCode you never set up. Expired sessions still show.
 - Providers and gauges: turn off any provider, or single gauges like Fable. Gauges show up in this list once the provider has reported them.
@@ -26,7 +27,7 @@ Usage is fetched when the card mounts, every 2 minutes while the window is visib
 
 ## Limits
 
-It only reads the primary machine's providers. Shared account pools and other machines are what the built-in Provider usage plugin is for. While the card is open, BB's footer treats Escape as "close disclosure", so the card flickers closed and reopens on Escape.
+It reads one machine at a time, and doesn't aggregate shared account pools. That's what the built-in Provider usage plugin is for. While the card is open, BB's footer treats Escape as "close disclosure", so the card flickers closed and reopens on Escape.
 
 ## Develop
 

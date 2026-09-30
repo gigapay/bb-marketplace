@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-usage-bar",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "description": "Always-visible provider usage bars in the BB sidebar footer.",
   "engines": {

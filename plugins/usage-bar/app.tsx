@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   definePluginApp,
   experimental_ProviderIcon as ProviderIcon,
@@ -12,15 +12,15 @@ import { cn } from "@/lib/utils";
 import {
   describeWindow,
   formatCountdown,
-  getUsageSnapshot,
   refreshUsage,
   shortWindowLabel,
-  subscribeUsage,
+  useUsageSnapshot,
   usageTone,
   type UsageWindow,
 } from "./usage";
 import { windowKey } from "./prefs";
 import { usePrefs } from "./use-prefs";
+import { useUsageMachine } from "./machines";
 import { useUsageRows, type UsageRow } from "./rows";
 import { UsageSettings } from "./settings";
 
@@ -222,8 +222,10 @@ function IconButton({
 
 function UsageBar() {
   const sdk = useSdk();
-  const snapshot = useSyncExternalStore(subscribeUsage, getUsageSnapshot, getUsageSnapshot);
   const [prefs] = usePrefs();
+  const machine = useUsageMachine(prefs);
+  const hostId = machine.hostId;
+  const snapshot = useUsageSnapshot(hostId);
   const { threads } = experimental_useSidebarThreads();
   const allRows = useUsageRows(snapshot.data);
   const [now, setNow] = useState(() => Date.now());
@@ -241,13 +243,13 @@ function UsageBar() {
     const tick = () => {
       if (document.visibilityState === "hidden") return;
       setNow(Date.now());
-      void refreshUsage(sdk, POLL_INTERVAL_MS - 5_000);
+      void refreshUsage(sdk, POLL_INTERVAL_MS - 5_000, hostId);
     };
     const onFocus = () => {
       setNow(Date.now());
-      void refreshUsage(sdk, STALE_AFTER_MS);
+      void refreshUsage(sdk, STALE_AFTER_MS, hostId);
     };
-    void refreshUsage(sdk, STALE_AFTER_MS);
+    void refreshUsage(sdk, STALE_AFTER_MS, hostId);
     const clock = window.setInterval(() => setNow(Date.now()), 30_000);
     const poll = window.setInterval(tick, POLL_INTERVAL_MS);
     window.addEventListener("focus", onFocus);
@@ -256,7 +258,7 @@ function UsageBar() {
       window.clearInterval(poll);
       window.removeEventListener("focus", onFocus);
     };
-  }, [sdk]);
+  }, [sdk, hostId]);
 
   // A finished turn is when usage actually moves, so refresh shortly after one.
   const busyCount = threads.filter(
@@ -268,11 +270,11 @@ function UsageBar() {
     previousBusy.current = busyCount;
     if (!dropped) return;
     const timer = window.setTimeout(
-      () => void refreshUsage(sdk, STALE_AFTER_MS / 2),
+      () => void refreshUsage(sdk, STALE_AFTER_MS / 2, hostId),
       AFTER_TURN_DELAY_MS,
     );
     return () => window.clearTimeout(timer);
-  }, [busyCount, sdk]);
+  }, [busyCount, sdk, hostId]);
 
   const rows = allRows
     .filter(
@@ -291,7 +293,7 @@ function UsageBar() {
 
   const loadedAgo =
     snapshot.loadedAt === null ? null : Math.max(0, Math.round((now - snapshot.loadedAt) / 60_000));
-  const status =
+  const freshness =
     snapshot.error !== null && snapshot.data !== null
       ? snapshot.error
       : loadedAgo === null
@@ -299,6 +301,8 @@ function UsageBar() {
         : loadedAgo === 0
           ? "Updated just now"
           : `Updated ${loadedAgo} min ago`;
+  // Name the machine only when it isn't the default one, so the usual case stays quiet.
+  const status = [machine.name, freshness].filter(Boolean).join(" · ");
   const controls = (
     <>
       <IconButton
@@ -306,7 +310,7 @@ function UsageBar() {
         icon="RotateCcw"
         spinning={snapshot.refreshing}
         disabled={snapshot.refreshing}
-        onClick={() => void refreshUsage(sdk, 0)}
+        onClick={() => void refreshUsage(sdk, 0, hostId)}
       />
       <IconButton
         label="Usage bar settings"

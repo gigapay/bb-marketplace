@@ -6,13 +6,20 @@ export interface UsagePrefs {
   hiddenProviders: string[];
   /** Keys from {@link windowKey}. */
   hiddenWindows: string[];
+  /** Whose usage to show: {@link PRIMARY_MACHINE}, {@link THREAD_MACHINE}, or a host id. */
+  machine: string;
 }
+
+export const PRIMARY_MACHINE = "primary";
+/** Follow the machine of the thread currently open, falling back to the primary one. */
+export const THREAD_MACHINE = "thread";
 
 export const DEFAULT_PREFS: UsagePrefs = {
   compact: false,
   hideSignedOut: true,
   hiddenProviders: [],
   hiddenWindows: [],
+  machine: PRIMARY_MACHINE,
 };
 
 /** Realtime channel; the payload is the new prefs. */
