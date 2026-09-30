@@ -1,7 +1,7 @@
 {
   "$schema": "https://getbb.app/schemas/plugins.schema.json",
   "schemaVersion": 1,
-  "name": "yteruel31-bb-plugins",
+  "name": "gigapay-bb-plugins",
   "plugins": [
     { "name": "linear-issues", "source": "./plugins/linear-issues" },
     { "name": "usage-bar", "source": "./plugins/usage-bar" },

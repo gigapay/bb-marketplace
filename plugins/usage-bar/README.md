@@ -39,5 +39,5 @@ bb plugin build
 The BB server has to be able to read the source, so install from Git when BB runs on another machine:
 
 ```
-bb plugin install git:https://github.com/yteruel31/bb-marketplace.git@main --subdirectory plugins/usage-bar
+bb plugin install git:https://github.com/gigapay/bb-marketplace.git@main --subdirectory plugins/usage-bar
 ```

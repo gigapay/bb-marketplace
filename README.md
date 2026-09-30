@@ -1,14 +1,14 @@
 # bb-marketplace
 
-My personal BB plugin marketplace. It holds the plugins themselves under `plugins/` and the `marketplace.json` catalog that points at them.
+Gigapay's BB plugin marketplace. It holds the plugins themselves under `plugins/` and the `marketplace.json` catalog that points at them.
 
 ## Add it to BB
 
 ```
-bb marketplace add git:github.com/yteruel31/bb-marketplace@main
+bb marketplace add git:github.com/gigapay/bb-marketplace@main
 ```
 
-Then install from the Plugins page, or run `bb plugin install linear-issues@yteruel31`.
+Then install from the Plugins page, or run `bb plugin install linear-issues@gigapay`.
 
 ## Plugins
 

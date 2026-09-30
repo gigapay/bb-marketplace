@@ -22,7 +22,7 @@ export function openRouterJev(apiKey: string): JevClient {
     fetch: (input, init) => {
       const url = input.endsWith("/v1/systemone") ? OPENROUTER_DECISIONS : input;
       const headers = new Headers(init?.headers);
-      headers.set("HTTP-Referer", "https://github.com/yteruel31/bb-marketplace");
+      headers.set("HTTP-Referer", "https://github.com/gigapay/bb-marketplace");
       headers.set("X-OpenRouter-Title", "BB Linear Issues triage");
       return fetch(url, { ...init, headers });
     },
