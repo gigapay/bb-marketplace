@@ -38,7 +38,7 @@ const PRIORITY_NUMBERS: Record<string, number> = { "No priority": 0, Urgent: 1, 
 function ChangeSummary({ change }: { change: TriageChangeDto }) {
   if (change.kind === "priority") {
     return (
-      <span className="inline-flex min-w-0 items-center gap-1.5">
+      <span className="inline-flex min-w-0 flex-wrap items-center gap-1.5">
         <PriorityIcon priority={PRIORITY_NUMBERS[change.currentLabel] ?? 0} label={change.currentLabel} />
         <span className="text-muted-foreground line-through decoration-muted-foreground/50">{change.currentLabel}</span>
         <Icon name="ArrowRight" className="size-3 text-muted-foreground" />
@@ -50,17 +50,30 @@ function ChangeSummary({ change }: { change: TriageChangeDto }) {
   if (change.kind === "label") {
     return (
       <span
-        className="inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium"
+        className="inline-flex max-w-full items-center gap-1.5 break-words rounded-full border px-2 py-0.5 text-xs font-medium"
         style={change.color ? { borderColor: `${change.color}80`, backgroundColor: `${change.color}1a` } : undefined}
       >
         <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: change.color ?? "currentColor" }} />
-        <span className="truncate">+ {change.label}</span>
+        <span className="min-w-0">+ {change.label}</span>
       </span>
     );
   }
-  if (change.kind === "project") return <span className="truncate font-medium">→ {change.label}</span>;
-  if (change.kind === "cancel") return <span className="truncate">{change.reason}</span>;
-  return <span className="truncate">Ask for: {change.gaps.join(", ")}</span>;
+  // Everything wraps: review text is read, not scanned, and it must never
+  // push the dialog wider than the screen.
+  if (change.kind === "project") return <span className="block break-words font-medium">→ {change.label}</span>;
+  if (change.kind === "cancel") return <span className="block break-words">{change.reason}</span>;
+  return (
+    <span className="block">
+      <span className="text-muted-foreground">Ask the reporter for:</span>
+      <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+        {change.gaps.map((gap) => (
+          <li key={gap} className="break-words">
+            {gap}
+          </li>
+        ))}
+      </ul>
+    </span>
+  );
 }
 
 const VERBS: Record<TriageChangeDto["kind"], string> = {
@@ -258,7 +271,7 @@ export function TriageDialog({
           </EmptyState>
         ) : (
           <div className="space-y-3">
-            <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+            <div className="max-h-[60vh] min-w-0 space-y-2 overflow-y-auto overflow-x-hidden pr-1">
               {withChanges.length === 0 ? (
                 <EmptyState>Jev found nothing to change. Everything looks triaged.</EmptyState>
               ) : (
@@ -274,9 +287,9 @@ export function TriageDialog({
                           : "border-border",
                     )}
                   >
-                    <header className="mb-1.5 flex items-center gap-2 text-sm">
-                      <span className="shrink-0 font-mono text-xs text-muted-foreground">{proposal.identifier}</span>
-                      <span className="min-w-0 flex-1 truncate font-medium">{proposal.title}</span>
+                    <header className="mb-1.5 flex items-start gap-2 text-sm">
+                      <span className="mt-0.5 shrink-0 font-mono text-xs text-muted-foreground">{proposal.identifier}</span>
+                      <span className="min-w-0 flex-1 break-words font-medium">{proposal.title}</span>
                       {proposal.needsInfo ? (
                         <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
                           Needs more info
@@ -292,19 +305,22 @@ export function TriageDialog({
                         const editable = change.kind === "comment" || change.kind === "cancel";
                         return (
                           <li key={key} className={cn("rounded-md border-l-2 transition-opacity", tone.row, !checked && "opacity-60")}>
-                            <label className="flex cursor-pointer items-center gap-2 px-2 py-1 text-sm">
+                            <label className="flex cursor-pointer items-start gap-2 px-2 py-1.5 text-sm">
                               <Checkbox
+                                className="mt-0.5"
                                 checked={checked}
                                 onCheckedChange={(on) => toggle(key, on === true)}
                                 disabled={phase.kind === "applying"}
                               />
-                              <span className={cn("w-16 shrink-0 text-xs font-semibold uppercase tracking-wide", tone.verb)}>
+                              <span className={cn("mt-0.5 w-16 shrink-0 text-xs font-semibold uppercase tracking-wide", tone.verb)}>
                                 {VERBS[change.kind]}
                               </span>
-                              <span className="min-w-0 flex-1">
+                              <span className="min-w-0 flex-1 break-words">
                                 <ChangeSummary change={change} />
                               </span>
-                              <ConfidencePill value={change.confidence} />
+                              <span className="mt-0.5 shrink-0 self-start">
+                                <ConfidencePill value={change.confidence} />
+                              </span>
                             </label>
                             {editable && checked ? (
                               <textarea
