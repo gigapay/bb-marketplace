@@ -38,7 +38,7 @@ function StatusBadge({ status }: { status: ProjectSummary["status"] }) {
 }
 
 function ProgressBar({ value, color }: { value: number; color: string }) {
-  const percent = Math.round(value * 100);
+  const percent = Math.round(Math.min(1, Math.max(0, value)) * 100);
   return (
     <span className="inline-flex shrink-0 items-center gap-2 text-xs text-muted-foreground" aria-label={`${percent}% done`}>
       <span className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">

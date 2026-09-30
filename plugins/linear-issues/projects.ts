@@ -86,8 +86,12 @@ type RawProjectDetail = RawProject & {
   };
 };
 
+function clampFraction(value: number): number {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+}
+
 export function flattenProject(raw: RawProject): ProjectSummary {
-  return { ...raw, teams: raw.teams.nodes.map((team) => team.key) };
+  return { ...raw, progress: clampFraction(raw.progress), teams: raw.teams.nodes.map((team) => team.key) };
 }
 
 export function flattenProjectDetail(raw: RawProjectDetail): ProjectDetail {
@@ -98,7 +102,9 @@ export function flattenProjectDetail(raw: RawProjectDetail): ProjectDetail {
     milestones: raw.projectMilestones.nodes
       .slice()
       .sort((a, b) => a.sortOrder - b.sortOrder)
-      .map(({ id, name, targetDate, progress }) => ({ id, name, targetDate, progress })),
+      // Linear reports milestone progress in percent but project progress as
+      // a 0–1 fraction; normalize to the fraction.
+      .map(({ id, name, targetDate, progress }) => ({ id, name, targetDate, progress: clampFraction(progress / 100) })),
     updates: raw.projectUpdates.nodes
       .map((update) => ({
         id: update.id,
