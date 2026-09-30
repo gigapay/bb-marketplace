@@ -18,6 +18,7 @@ import {
   useDebounced,
 } from "./shared";
 import { useIssueLinks } from "./links";
+import { TriageDialog } from "./Triage";
 
 // "linked" is local: the issues that have at least one BB thread.
 type ListScope = Exclude<IssueScope, "all"> | "linked";
@@ -65,6 +66,7 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [triageOpen, setTriageOpen] = useState(false);
 
   // Sorted so a new Map instance with the same keys doesn't refetch.
   const linkedKey = [...links.byIssue.keys()].sort().join(",");
@@ -162,12 +164,22 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
           />
           Show done
         </label>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setTriageOpen(true)}
+          disabled={!issues || issues.length === 0}
+        >
+          <Icon name="linear-issues/linear" className="size-3.5 text-[#5E6AD2]" />
+          Triage with Jev
+        </Button>
         <Button variant="ghost" size="icon" aria-label="Refresh" onClick={load} disabled={loading}>
           <Icon name="ArrowReloadHorizontal" className={cn("size-4", loading && "animate-spin")} />
         </Button>
       </div>
 
       <ErrorLine error={error} />
+      <TriageDialog open={triageOpen} onOpenChange={setTriageOpen} issues={issues ?? []} onApplied={load} />
 
       <div className="mt-4 space-y-4">
         {issues === null ? (

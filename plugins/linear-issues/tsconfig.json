@@ -32,7 +32,8 @@
     "shared",
     "host.ts",
     "contract.ts",
-    "worktree"
+    "worktree",
+    "triage"
   ],
   "exclude": [
     "**/*.test.ts",

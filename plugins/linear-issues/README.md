@@ -42,6 +42,20 @@ BB's sidebar belongs to its bundled thread-list plugin, which has no extension p
 
 Linear serves pasted images and attachments from `uploads.linear.app` only when the request carries the API key. The server exposes `GET /api/v1/plugins/linear-issues/http/upload?url=…` (auth `local`), which fetches the file with the key and streams it back. It only proxies `https://uploads.linear.app`, so the key can't be sent anywhere else. `lib/uploads.ts` rewrites those URLs in descriptions and comments before they reach `Markdown`. Non-image files are served as downloads, and responses carry `nosniff` plus a sandboxing CSP.
 
+## Triage with Jev
+
+"Triage with Jev" in the Linear page asks TypeSafe's Jev model about every issue in the current list (up to 50). It uses the official `@typesafe-ai/sdk`, pointed at OpenRouter (`openRouterApiKey` setting) with a small fetch shim, because OpenRouter serves the same System One protocol at `/api/alpha/decisions`.
+
+Jev doesn't write text. It answers typed questions with probabilities, so triage is a set of narrow questions per issue, all in one request. They're defined, with their thresholds, in `triage/criteria.ts`:
+
+- Priority: a `choice` of urgent/high/medium/low with contrastive, Gigapay-specific criteria.
+- Type label: a `choice` among Bug, Improvement, Feature, Refactor and Maintenance. It's only asked when the issue has none of them.
+- Area labels: one `noul` per area (Backend, Frontend, Devops, Design, Security, Data), so several can apply.
+- Project: a `choice` among the team's active projects plus `none`. It's only asked when the issue has no project.
+- Readiness: a `noul` "could an engineer start today?". A low value flags "Needs more info" in the review and changes nothing.
+
+Only labels that exist in the workspace are asked about. `triage/engine.ts` turns the answers into proposals. A proposal below the `propose` threshold is dropped, and one above `preselect` is pre-checked. The review dialog (`views/Triage.tsx`) lists them per issue with their confidence. Only the checked changes are applied, through `issueUpdate`. Labels are added with `addedLabelIds` and never removed. The optional `triageGuidelines` setting passes team conventions to every request.
+
 ## Comments
 
 `views/Comments.tsx` groups Linear's flat comment list into discussions with `shared/comments.ts`: each root comment with its replies, since Linear nests one level. Resolved discussions are folded away, and comments from integrations show the bot or external author. Comments and replies are posted through the `comment_create` RPC (`commentCreate` mutation) as the API key's owner, only when the user presses Comment or Reply. That is the plugin's only write to Linear. The agent CLI stays read-only.

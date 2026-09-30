@@ -7,6 +7,8 @@ import { z } from "zod";
 import { hostContract, hostSignals } from "./contract.js";
 import { groupCommentThreads } from "./shared/comments.js";
 import { registerLinearWorktree } from "./worktree/provider.js";
+import { triageIssue, type TriageContext, type TriageProposal } from "./triage/engine.js";
+import { applyIssueUpdate, loadTriageContext, loadTriageIssues, openRouterJev } from "./triage/linear.js";
 import { IDENTIFIER_PATTERN, LINKS_CHANGED, linkedIssueFromPrompt, resolveLink, resolveThreadLinks } from "./shared/links";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
@@ -94,6 +96,23 @@ const storedLinkSchema = z.object({
 });
 export type StoredLink = z.infer<typeof storedLinkSchema>;
 
+const triageChangeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("priority"), value: z.number(), label: z.string(), currentLabel: z.string(), confidence: z.number(), preselected: z.boolean() }),
+  z.object({ kind: z.literal("label"), labelId: z.string(), label: z.string(), group: z.enum(["type", "area"]), confidence: z.number(), preselected: z.boolean() }),
+  z.object({ kind: z.literal("project"), projectId: z.string(), label: z.string(), confidence: z.number(), preselected: z.boolean() }),
+]);
+const triageProposalSchema = z.object({
+  issueId: z.string(),
+  identifier: z.string(),
+  title: z.string(),
+  changes: z.array(triageChangeSchema),
+  readiness: z.number().nullable(),
+  needsInfo: z.boolean(),
+  error: z.string().nullable(),
+});
+export type TriageProposalDto = z.infer<typeof triageProposalSchema>;
+export type TriageChangeDto = z.infer<typeof triageChangeSchema>;
+
 export const rpcContract = defineRpcContract({
   status: {
     input: z.null(),
@@ -127,6 +146,36 @@ export const rpcContract = defineRpcContract({
       })
       .strict(),
     output: z.object({ id: z.string() }),
+  },
+  triage_status: {
+    input: z.null(),
+    output: z.object({ configured: z.boolean() }),
+  },
+  // Asks Jev about each issue; read-only, nothing is written to Linear.
+  triage_run: {
+    input: z.object({ issueIds: z.array(z.string().min(1).max(100)).min(1).max(50) }).strict(),
+    output: z.object({ proposals: z.array(triageProposalSchema) }),
+  },
+  // Applies only the changes the user kept in the review.
+  triage_apply: {
+    input: z
+      .object({
+        updates: z
+          .array(
+            z
+              .object({
+                issueId: z.string().min(1).max(100),
+                priority: z.number().int().min(0).max(4).optional(),
+                addedLabelIds: z.array(z.string().min(1).max(100)).max(20).optional(),
+                projectId: z.string().min(1).max(100).optional(),
+              })
+              .strict(),
+          )
+          .min(1)
+          .max(50),
+      })
+      .strict(),
+    output: z.object({ results: z.array(z.object({ issueId: z.string(), error: z.string().nullable() })) }),
   },
   issues_by_identifiers: {
     input: z.object({ identifiers: z.array(identifierSchema).max(100) }).strict(),
@@ -309,6 +358,20 @@ export default async function plugin(bb: BbPluginApi) {
       description:
         "When a thread started from a ticket gets a new worktree, rename BB's generated branch to the ticket's Linear branch.",
       default: true,
+    },
+    openRouterApiKey: {
+      type: "string",
+      label: "OpenRouter API key (Jev triage)",
+      description: "Used to ask TypeSafe's Jev model to triage tickets. Issue text is sent to OpenRouter/TypeSafe, and OpenRouter bills the usage.",
+      secret: true,
+    },
+    triageGuidelines: {
+      type: "string",
+      label: "Triage guidelines",
+      description: "Optional team conventions Jev should follow when triaging, e.g. what counts as urgent for you. Sent with every triage request.",
+      experimental_multiline: true,
+      default: "",
+      experimental_schema: z.string().max(4000, "Keep guidelines under 4000 characters"),
     },
     worktreesRoot: {
       type: "string",
@@ -613,6 +676,62 @@ export default async function plugin(bb: BbPluginApi) {
         throw new Error("Linear didn't accept the comment");
       }
       return { id: data.commentCreate.comment.id };
+    },
+    triage_status: async () => {
+      const { openRouterApiKey } = await settings.get();
+      return { configured: typeof openRouterApiKey === "string" && openRouterApiKey.trim() !== "" };
+    },
+    triage_run: async ({ issueIds }) => {
+      const { openRouterApiKey, triageGuidelines } = await settings.get();
+      if (typeof openRouterApiKey !== "string" || openRouterApiKey.trim() === "") {
+        throw new Error("Set the OpenRouter API key in the plugin settings to triage with Jev.");
+      }
+      const jev = openRouterJev(openRouterApiKey.trim());
+      const loaded = await loadTriageIssues(linear, [...new Set(issueIds)]);
+      const contexts = new Map<string, Promise<TriageContext>>();
+      const contextFor = (teamId: string) => {
+        if (!contexts.has(teamId)) contexts.set(teamId, loadTriageContext(linear, teamId, triageGuidelines));
+        return contexts.get(teamId)!;
+      };
+      // A few requests at a time; one failing ticket doesn't sink the batch.
+      const proposals: (TriageProposal & { error: string | null })[] = [];
+      for (let start = 0; start < loaded.length; start += 5) {
+        const batch = loaded.slice(start, start + 5);
+        proposals.push(
+          ...(await Promise.all(
+            batch.map(async ({ teamId, issue }) => {
+              try {
+                return { ...(await triageIssue(jev, issue, await contextFor(teamId))), error: null };
+              } catch (cause) {
+                return {
+                  issueId: issue.id,
+                  identifier: issue.identifier,
+                  title: issue.title,
+                  changes: [],
+                  readiness: null,
+                  needsInfo: false,
+                  error: errorMessage(cause),
+                };
+              }
+            }),
+          )),
+        );
+      }
+      const order = new Map(issueIds.map((id, index) => [id, index]));
+      proposals.sort((a, b) => (order.get(a.issueId) ?? 0) - (order.get(b.issueId) ?? 0));
+      return { proposals };
+    },
+    triage_apply: async ({ updates }) => {
+      const results = [];
+      for (const { issueId, ...update } of updates) {
+        try {
+          await applyIssueUpdate(linear, issueId, update);
+          results.push({ issueId, error: null });
+        } catch (cause) {
+          results.push({ issueId, error: errorMessage(cause) });
+        }
+      }
+      return { results };
     },
     issues_by_identifiers: async ({ identifiers }) => ({
       issues: await issuesByIdentifiers([...new Set(identifiers)]),
