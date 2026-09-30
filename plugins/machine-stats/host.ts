@@ -67,7 +67,23 @@ async function availableMemoryBytes(signal: AbortSignal): Promise<number> {
   return os.freemem();
 }
 
+// Mounted .dmg installers are read-only and always look 100% full.
+async function readOnlyDevices(signal: AbortSignal): Promise<Set<string>> {
+  if (process.platform !== "darwin") return new Set();
+  try {
+    const { stdout } = await run("mount", [], { timeout: 5_000, signal });
+    const devices = stdout
+      .split("\n")
+      .filter((line) => /\(.*\bread-only\b.*\)$/.test(line))
+      .map((line) => line.split(" on ")[0] ?? "");
+    return new Set(devices);
+  } catch {
+    return new Set();
+  }
+}
+
 async function diskUsage(signal: AbortSignal): Promise<DiskUsage[]> {
+  const readOnly = await readOnlyDevices(signal);
   // df exits 1 when any mount is unreadable (a dead FUSE mount, say) but still
   // prints every other filesystem, so keep its stdout on failure.
   const stdout = await run("df", ["-kP"], { timeout: 5_000, signal }).then(
@@ -96,7 +112,7 @@ async function diskUsage(signal: AbortSignal): Promise<DiskUsage[]> {
     ) {
       continue;
     }
-    if (seen.has(filesystem)) continue;
+    if (readOnly.has(filesystem) || seen.has(filesystem)) continue;
     seen.add(filesystem);
     disks.push({
       mount,
