@@ -53,7 +53,9 @@ export function PullRequestDetail({
   }, [headSha, refresh]);
 
   return (
-    <div className="space-y-5">
+    // The page gives a PR the full width; only the diff keeps it, the overview
+    // stays in the usual centered container.
+    <div className={cn("mx-auto space-y-5", tab === "diff" ? "max-w-none" : "max-w-5xl")}>
       {onBack ? (
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
           <Icon name="ChevronLeft" className="size-4" />
@@ -86,8 +88,7 @@ export function PullRequestDetail({
           {tab === "diff" ? (
             <PrDiffView pr={pr} threadId={threadId} onChanged={refresh} compact={threadId !== null} />
           ) : (
-            // Prose reads badly at full width; the diff tab is the one that needs it.
-            <div className="max-w-5xl space-y-5">
+            <div className="space-y-5">
               {threadId === null ? <LinkedThreads branch={pr.headRefName} /> : null}
               <ChecksSection state={checks} />
               <Reviewers pr={pr} rpc={rpc} onChanged={load} />
