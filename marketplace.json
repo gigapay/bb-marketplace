@@ -8,7 +8,7 @@
     {
       "id": "linear-issues",
       "displayName": "Linear Issues",
-      "description": "Browse your Linear issues and start a BB thread from any ticket.",
+      "description": "Browse, create and edit Linear issues, projects and updates, and start a BB thread from any ticket.",
       "icon": "SquareKanban",
       "tags": [
         "linear",

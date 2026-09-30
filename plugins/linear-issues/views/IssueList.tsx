@@ -19,6 +19,7 @@ import {
 } from "./shared";
 import { useIssueLinks } from "./links";
 import { TriageDialog } from "./Triage";
+import { IssueFormDialog } from "./editing";
 import { EMPTY_FILTERS, FilterBar, activeFilterCount, matchesFilters } from "./Filters";
 import type { IssueFilters } from "../projects";
 
@@ -68,6 +69,7 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [triageOpen, setTriageOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [filters, setFilters] = useState<IssueFilters>(EMPTY_FILTERS);
   // Stable key so a new but equal filter object doesn't refetch.
   const filtersKey = JSON.stringify(filters);
@@ -149,6 +151,10 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
           />
           Show done
         </label>
+        <Button size="sm" onClick={() => setCreating(true)}>
+          <Icon name="Plus" className="size-4" />
+          New issue
+        </Button>
         <Button
           variant="outline"
           size="sm"
@@ -164,6 +170,7 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
       </div>
 
       <FilterBar filters={filters} onChange={setFilters} />
+      <IssueFormDialog open={creating} onOpenChange={setCreating} onCreated={onOpen} />
       <ErrorLine error={error} />
       <TriageDialog
         open={triageOpen}

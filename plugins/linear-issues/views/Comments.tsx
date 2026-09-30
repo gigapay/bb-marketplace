@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import type { IssueComment, IssueDetail, rpcContract } from "../server";
 import { groupCommentThreads, type CommentThread } from "../shared/comments";
 import { errorText, relativeTime } from "./shared";
+import { useWriteOptions } from "./editing";
 
 /** Linear's discussions: root comments with their replies, plus a composer. */
 export function CommentThreads({ issue, onChanged }: { issue: IssueDetail; onChanged: () => void }) {
@@ -65,7 +66,7 @@ function Discussion({
   return (
     <article className={cn("rounded-lg border border-border bg-card", thread.resolved && "opacity-75")}>
       <div className="p-3">
-        <CommentBody comment={thread.root} />
+        <CommentBody comment={thread.root} onChanged={onChanged} />
         {thread.resolved ? (
           <p className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
             <Icon name="Check" className="size-3" />
@@ -78,7 +79,7 @@ function Discussion({
         <ol className="space-y-3 border-t border-border px-3 py-3">
           {thread.replies.map((reply) => (
             <li key={reply.id} className="ml-2 border-l-2 border-border pl-3">
-              <CommentBody comment={reply} />
+              <CommentBody comment={reply} onChanged={onChanged} />
             </li>
           ))}
         </ol>
@@ -110,8 +111,40 @@ function Discussion({
   );
 }
 
-function CommentBody({ comment }: { comment: IssueComment }) {
+function CommentBody({ comment, onChanged }: { comment: IssueComment; onChanged: () => void }) {
+  const rpc = useRpc<typeof rpcContract>();
+  const options = useWriteOptions();
+  const mine = options !== null && comment.user?.id === options.viewer.id;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(comment.body);
+  const [busy, setBusy] = useState(false);
   const initial = comment.author.name.trim().charAt(0).toUpperCase() || "?";
+
+  const saveEdit = async () => {
+    if (!draft.trim() || busy) return;
+    setBusy(true);
+    try {
+      await rpc.call("comment_update", { id: comment.id, body: draft });
+      setEditing(false);
+      onChanged();
+    } catch (cause) {
+      toast.error(errorText(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (!window.confirm("Delete this comment from Linear?")) return;
+    setBusy(true);
+    try {
+      await rpc.call("comment_delete", { id: comment.id });
+      onChanged();
+    } catch (cause) {
+      toast.error(errorText(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div>
       <p className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
@@ -124,13 +157,40 @@ function CommentBody({ comment }: { comment: IssueComment }) {
         <span className="font-medium text-foreground">{comment.author.name}</span>
         <span>{relativeTime(comment.createdAt)}</span>
         {comment.editedAt ? <span>(edited)</span> : null}
+        {mine && !editing ? (
+          <span className="ml-auto flex gap-2">
+            <button type="button" onClick={() => { setDraft(comment.body); setEditing(true); }} className="hover:text-foreground" disabled={busy}>
+              Edit
+            </button>
+            <button type="button" onClick={() => void remove()} className="hover:text-red-600" disabled={busy}>
+              Delete
+            </button>
+          </span>
+        ) : null}
       </p>
       {comment.quotedText ? (
         <blockquote className="mb-1 border-l-2 border-border pl-2 text-xs italic text-muted-foreground">
           {comment.quotedText}
         </blockquote>
       ) : null}
-      <Markdown content={proxyLinearUploads(comment.body)} />
+      {editing ? (
+        <div className="space-y-2">
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            aria-label="Edit comment"
+            rows={4}
+            className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={busy}>Cancel</Button>
+            <Button size="sm" onClick={() => void saveEdit()} disabled={busy || !draft.trim()}>Save</Button>
+          </div>
+        </div>
+      ) : (
+        <Markdown content={proxyLinearUploads(comment.body)} />
+      )}
     </div>
   );
 }
