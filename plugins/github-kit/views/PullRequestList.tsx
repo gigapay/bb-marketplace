@@ -6,7 +6,8 @@ import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { PullRequest, rpcContract } from "../server";
-import type { PrScope } from "../shared/search";
+import { PR_SCOPES, type PrScope } from "../shared/search";
+import { readUi, writeUi } from "./uiState";
 import {
   ChecksIcon,
   EmptyState,
@@ -43,8 +44,21 @@ function groupByRepository(pullRequests: PullRequest[]): Group[] {
 
 export function PullRequestList({ viewer, onOpen }: { viewer: string; onOpen: (key: string) => void }) {
   const rpc = useRpc<typeof rpcContract>();
-  const [scope, setScope] = useState<PrScope>("review");
-  const [includeClosed, setIncludeClosed] = useState(false);
+  // Kept for the session, so coming back to the page keeps your tab.
+  const [scope, setScopeState] = useState<PrScope>(() =>
+    readUi("list.scope", "review" as PrScope, (value): value is PrScope => typeof value === "string" && (PR_SCOPES as readonly string[]).includes(value)),
+  );
+  const [includeClosed, setIncludeClosedState] = useState(() =>
+    readUi("list.closed", false, (value): value is boolean => typeof value === "boolean"),
+  );
+  const setScope = (next: PrScope) => {
+    setScopeState(next);
+    writeUi("list.scope", next);
+  };
+  const setIncludeClosed = (next: boolean) => {
+    setIncludeClosedState(next);
+    writeUi("list.closed", next);
+  };
   const [search, setSearch] = useState("");
   const query = useDebounced(search.trim(), 400);
   const [result, setResult] = useState<{ pullRequests: PullRequest[]; total: number } | null>(null);

@@ -15,8 +15,11 @@ import { HomeSection } from "./views/HomeSection";
 import { SidebarPrBadges } from "./views/SidebarPrBadges";
 import { parsePrKey, prKey } from "./shared/pr-ref";
 import type { rpcContract } from "./server";
+import { isString, readUi, writeUi } from "./views/uiState";
 
 const PANEL_PATH = "pulls";
+// The bare route reopens your last PR; this one always shows the list.
+export const LIST_SUBPATH = "list";
 
 type Status = { configured: boolean; viewer: { login: string } | null; error: string | null };
 
@@ -38,11 +41,26 @@ function GitHubPage({ subPath }: PluginNavPanelProps) {
   }, [rpc]);
 
   const openKey = keyFromSubPath(subPath);
+  // Coming back to the page lands on the bare list route; reopen the PR you
+  // were on. "Pull requests" (back) clears it, so the list stays reachable.
+  useEffect(() => {
+    if (subPath === "") {
+      const last = readUi("last-pr", "", isString);
+      if (last !== "" && keyFromSubPath(last) !== null) navigate.toPluginPanel(PANEL_PATH, { subPath: last, replace: true });
+    } else if (keyFromSubPath(subPath) !== null) {
+      writeUi("last-pr", subPath);
+    }
+    // Only on route changes; navigate is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subPath]);
   const openPr = (key: string) => {
     const ref = parsePrKey(key);
     if (ref) navigate.toPluginPanel(PANEL_PATH, { subPath: `${ref.owner}/${ref.name}/${ref.number}` });
   };
-  const backToList = () => navigate.toPluginPanel(PANEL_PATH, { subPath: "" });
+  const backToList = () => {
+    writeUi("last-pr", null);
+    navigate.toPluginPanel(PANEL_PATH, { subPath: LIST_SUBPATH });
+  };
 
   return (
     <div className="h-full min-h-0 flex-1 overflow-y-auto">

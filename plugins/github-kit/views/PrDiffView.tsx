@@ -16,6 +16,7 @@ import type { rpcContract } from "../server";
 import { toGitPatch } from "../shared/patch";
 import { AnnotatedDiff } from "./DiffWithComments";
 import { EmptyState, ErrorLine, errorText, relativeTime } from "./shared";
+import { isString, readUi, writeUi } from "./uiState";
 
 type CommentFilter = "all" | "humans" | "bots" | "none";
 const COMMENT_FILTERS: { id: CommentFilter; label: string }[] = [
@@ -61,7 +62,12 @@ export function PrDiffView({
   compact: boolean;
 }) {
   const rpc = useRpc<typeof rpcContract>();
-  const [range, setRange] = useState<DiffRange>({ kind: "all" });
+  // Range and position come back when you return to the page.
+  const [range, setRangeState] = useState<DiffRange>(() => parseRange(readUi(`range.${pr.key}`, "all", isString)));
+  const setRange = (next: DiffRange) => {
+    setRangeState(next);
+    writeUi(`range.${pr.key}`, rangeValue(next));
+  };
   const [diff, setDiff] = useState<PrDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -159,6 +165,42 @@ export function PrDiffView({
   const toggleExpanded = (file: DiffFile) =>
     setExpandedOverride((current) => new Map(current).set(file.path, !isExpanded(file)));
   const setAllExpanded = (expanded: boolean) => setExpandedOverride(new Map(files.map((file) => [file.path, expanded])));
+  // Remember the file at the top of the screen as you scroll, and scroll back
+  // to it once the diff loads again.
+  const orderedKey = ordered.map((file) => file.path).join("\n");
+  const orderedPaths = useMemo(() => (orderedKey === "" ? [] : orderedKey.split("\n")), [orderedKey]);
+  useEffect(() => {
+    if (orderedPaths.length === 0) return;
+    let frame = 0;
+    const track = () => {
+      frame = 0;
+      for (const path of orderedPaths) {
+        const rect = document.getElementById(fileId(path))?.getBoundingClientRect();
+        if (rect && rect.bottom > 120) {
+          writeUi(`file.${pr.key}`, path);
+          return;
+        }
+      }
+    };
+    const onScroll = () => {
+      if (frame === 0) frame = requestAnimationFrame(track);
+    };
+    // Capture: the page scrolls inside BB's panel, not the window.
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      cancelAnimationFrame(frame);
+    };
+  }, [orderedPaths, pr.key]);
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || orderedPaths.length === 0) return;
+    restored.current = true;
+    const path = readUi(`file.${pr.key}`, "", isString);
+    if (path === "" || !orderedPaths.includes(path) || path === orderedPaths[0]) return;
+    requestAnimationFrame(() => document.getElementById(fileId(path))?.scrollIntoView({ block: "start" }));
+  }, [orderedPaths, pr.key]);
+
   const jumpTo = (file: DiffFile) => {
     setExpandedOverride((current) => new Map(current).set(file.path, true));
     requestAnimationFrame(() => document.getElementById(fileId(file.path))?.scrollIntoView({ block: "start", behavior: "smooth" }));

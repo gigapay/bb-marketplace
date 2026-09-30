@@ -132,7 +132,7 @@ export function HomeSection(_props: PluginHomepageSectionProps) {
           variant="ghost"
           size="sm"
           className={cn("h-7 text-muted-foreground", repos.length <= 1 && "ml-auto")}
-          onClick={() => navigate.toPluginPanel("pulls")}
+          onClick={() => navigate.toPluginPanel("pulls", { subPath: "list" })}
         >
           View all
           <Icon name="ChevronRight" className="size-3.5" />

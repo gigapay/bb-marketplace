@@ -23,6 +23,7 @@ import { usePrDetail } from "./useThreadPr";
 import { ChecksSection, usePrChecks } from "./Checks";
 import { PrDiffView } from "./PrDiffView";
 import { ReviewBar } from "./ReviewBar";
+import { readUi, writeUi } from "./uiState";
 import { ChecksIcon, EmptyState, ErrorLine, LabelChip, PrStateIcon, ReviewChip, errorText, relativeTime, useDebounced } from "./shared";
 
 type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
@@ -42,7 +43,14 @@ export function PullRequestDetail({
   const { detail: pr, error, loading, refresh } = usePrDetail(prKey);
   const load = () => void refresh();
   const checks = usePrChecks(prKey);
-  const [tab, setTab] = useState<"overview" | "diff">("overview");
+  // Remembered per PR, so coming back reopens the same tab.
+  const [tab, setTabState] = useState<"overview" | "diff">(() =>
+    readUi(`tab.${prKey}`, "overview" as const, (value): value is "overview" | "diff" => value === "overview" || value === "diff"),
+  );
+  const setTab = (next: "overview" | "diff") => {
+    setTabState(next);
+    writeUi(`tab.${prKey}`, next);
+  };
   // A new push changes the head commit: reload so comments and diff stats follow.
   const headSha = checks.checks?.headSha ?? null;
   const seenSha = useRef<string | null>(null);
