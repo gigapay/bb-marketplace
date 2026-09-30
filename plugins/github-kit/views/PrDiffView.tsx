@@ -64,6 +64,14 @@ export function PrDiffView({
   const [filter, setFilter] = useState("");
   const [comments, setComments] = useState<CommentFilter>("all");
   const [showTree, setShowTree] = useState(!compact);
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<FileGroup>>(new Set());
+  const toggleGroup = (group: FileGroup) =>
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
   const [view, setView] = useState<"unified" | "split">(compact ? "unified" : "split");
   // Viewed files start collapsed, like on GitHub; the user's clicks win.
   const [expandedOverride, setExpandedOverride] = useState<Map<string, boolean>>(new Map());
@@ -234,14 +242,23 @@ export function PrDiffView({
                 const deletions = groupFiles.reduce((sum, file) => sum + file.deletions, 0);
                 return (
                   <div key={group}>
-                    <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(group)}
+                      aria-expanded={!collapsedGroups.has(group)}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent/50"
+                    >
                       <span className="font-medium">{group}</span>
                       <span>{groupFiles.length}</span>
+                      <Icon
+                        name="ChevronRight"
+                        className={cn("size-3 transition-transform", !collapsedGroups.has(group) && "rotate-90")}
+                      />
                       <span className="ml-auto font-mono">
                         <span className="text-[#1f883d]">+{additions}</span> <span className="text-destructive">−{deletions}</span>
                       </span>
-                    </div>
-                    <ul>
+                    </button>
+                    <ul hidden={collapsedGroups.has(group)}>
                       {groupFiles.map((file) => {
                         const { name, dir } = splitPath(file.path);
                         return (
