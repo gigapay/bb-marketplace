@@ -8,7 +8,7 @@
   },
   "bb": {
     "name": "GitHub Kit",
-    "description": "Your GitHub pull requests in BB: review requests, your own PRs, CI and review status.",
+    "description": "Your GitHub PRs in BB: a PR tab per thread with live checks, reviewers, comments you can reply to, resolve and send to the agent, plus inline review comments in the diff.",
     "branding": {
       "icon": "./assets/github.svg",
       "experimental_icons": {
