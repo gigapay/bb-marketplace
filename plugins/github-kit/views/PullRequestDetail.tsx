@@ -86,7 +86,8 @@ export function PullRequestDetail({
           {tab === "diff" ? (
             <PrDiffView pr={pr} threadId={threadId} onChanged={refresh} compact={threadId !== null} />
           ) : (
-            <>
+            // Prose reads badly at full width; the diff tab is the one that needs it.
+            <div className="max-w-5xl space-y-5">
               {threadId === null ? <LinkedThreads branch={pr.headRefName} /> : null}
               <ChecksSection state={checks} />
               <Reviewers pr={pr} rpc={rpc} onChanged={load} />
@@ -98,7 +99,7 @@ export function PullRequestDetail({
                 )}
               </Section>
               <Comments pr={pr} rpc={rpc} threadId={threadId} onChanged={refresh} />
-            </>
+            </div>
           )}
           <ReviewBar pr={pr} onSubmitted={refresh} />
         </>

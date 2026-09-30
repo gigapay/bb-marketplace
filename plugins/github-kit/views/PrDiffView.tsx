@@ -224,7 +224,7 @@ export function PrDiffView({
       ) : (
         <div className="flex items-start gap-3">
           {showTree ? (
-            <nav aria-label="Changed files" className="sticky top-0 hidden max-h-[80vh] w-72 shrink-0 space-y-3 overflow-y-auto sm:block">
+            <nav aria-label="Changed files" className="sticky top-0 hidden max-h-[85vh] w-80 shrink-0 space-y-3 overflow-y-auto sm:block">
               <div className="relative">
                 <Icon name="Search" className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Filter files…" aria-label="Filter files" className="pl-8" />

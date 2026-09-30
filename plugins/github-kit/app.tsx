@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { definePluginApp, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import type { PluginNavPanelProps } from "@get-bb/plugin-sdk/app";
+import { cn } from "@/lib/utils";
 import { EmptyState, ErrorLine, errorText } from "./views/shared";
 import { PullRequestDetail } from "./views/PullRequestDetail";
 import { PullRequestList } from "./views/PullRequestList";
@@ -45,7 +46,8 @@ function GitHubPage({ subPath }: PluginNavPanelProps) {
 
   return (
     <div className="h-full min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto box-border w-full max-w-5xl px-4 pb-6 pt-3 md:px-5 md:pt-4">
+      {/* A PR uses the whole width, so the diff gets room; the list stays readable. */}
+      <div className={cn("mx-auto box-border w-full px-4 pb-6 pt-3 md:px-5 md:pt-4", openKey === null ? "max-w-5xl" : "max-w-none")}>
         <ErrorLine error={error} />
         {status === null ? (
           error === null ? <EmptyState>Connecting to GitHub…</EmptyState> : null
