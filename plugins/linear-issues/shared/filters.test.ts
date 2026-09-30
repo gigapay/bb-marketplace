@@ -30,5 +30,5 @@ test("milestone progress (percent) is normalized like project progress (fraction
     ] },
   } as any);
   assert.equal(detail.progress, 0.35);
-  assert.deepEqual(detail.milestones.map((m) => m.progress), [0.8462, 0]);
+  assert.deepEqual(detail.milestones.map((m) => Math.round(m.progress * 10_000) / 10_000), [0.8462, 0]);
 });

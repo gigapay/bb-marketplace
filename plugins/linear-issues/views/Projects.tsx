@@ -173,10 +173,18 @@ export function ProjectDetailView({
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"overview" | "updates" | "issues">("overview");
   const [includeCompleted, setIncludeCompleted] = useState(false);
+  // null = every issue; "none" = issues outside any milestone.
+  const [milestoneId, setMilestoneId] = useState<string | null>(null);
+
+  const openMilestone = (id: string) => {
+    setMilestoneId(id);
+    setTab("issues");
+  };
 
   useEffect(() => {
     let cancelled = false;
     setProject(null);
+    setMilestoneId(null);
     setError(null);
     rpc.call("project_get", { id: projectId }).then(
       (result) => !cancelled && setProject(result),
@@ -285,13 +293,24 @@ export function ProjectDetailView({
                   <Section title="Milestones">
                     <ul className="divide-y divide-border rounded-lg border border-border bg-card">
                       {project.milestones.map((milestone) => (
-                        <li key={milestone.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                          <Icon name="Target" className="size-3.5 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 truncate">{milestone.name}</span>
-                          <ProgressBar value={milestone.progress} color={project.color} />
-                          <span className="w-24 shrink-0 text-right text-xs text-muted-foreground">
-                            {formatDate(milestone.targetDate) ?? ""}
-                          </span>
+                        <li key={milestone.id}>
+                          <button
+                            type="button"
+                            onClick={() => openMilestone(milestone.id)}
+                            className="group flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-accent/50"
+                          >
+                            <Icon name="Target" className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="min-w-0 flex-1 truncate group-hover:underline">{milestone.name}</span>
+                            {issues ? (
+                              <span className="shrink-0 text-xs text-muted-foreground">
+                                {issues.filter((issue) => issue.milestone?.id === milestone.id).length} issues
+                              </span>
+                            ) : null}
+                            <ProgressBar value={milestone.progress} color={project.color} />
+                            <span className="w-24 shrink-0 text-right text-xs text-muted-foreground">
+                              {formatDate(milestone.targetDate) ?? ""}
+                            </span>
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -328,14 +347,29 @@ export function ProjectDetailView({
                   <Checkbox checked={includeCompleted} onCheckedChange={(checked) => setIncludeCompleted(checked === true)} />
                   Show done
                 </label>
+                {issues !== null && project.milestones.length > 0 ? (
+                  <MilestoneChips
+                    milestones={project.milestones}
+                    issues={issues}
+                    selected={milestoneId}
+                    color={project.color}
+                    onSelect={setMilestoneId}
+                  />
+                ) : null}
                 {issues === null ? (
                   <EmptyState>Loading issues…</EmptyState>
                 ) : (
                   <IssueGroups
-                    issues={issues}
+                    issues={issues.filter((issue) =>
+                      milestoneId === null
+                        ? true
+                        : milestoneId === "none"
+                          ? issue.milestone === null
+                          : issue.milestone?.id === milestoneId,
+                    )}
                     threadCount={(identifier) => links.byIssue.get(identifier)?.length ?? 0}
                     onOpen={onOpenIssue}
-                    emptyLabel="No issues in this project."
+                    emptyLabel={milestoneId === null ? "No issues in this project." : "No issues in this milestone."}
                   />
                 )}
               </div>
@@ -343,6 +377,53 @@ export function ProjectDetailView({
           </div>
         </article>
       )}
+    </div>
+  );
+}
+
+function MilestoneChips({
+  milestones,
+  issues,
+  selected,
+  color,
+  onSelect,
+}: {
+  milestones: ProjectDetail["milestones"];
+  issues: IssueSummary[];
+  selected: string | null;
+  color: string;
+  onSelect: (id: string | null) => void;
+}) {
+  const count = (id: string | null) =>
+    issues.filter((issue) => (id === null ? true : id === "none" ? issue.milestone === null : issue.milestone?.id === id)).length;
+  const chips = [
+    { id: null, label: "All" },
+    ...milestones.map((milestone) => ({ id: milestone.id, label: milestone.name })),
+    { id: "none", label: "No milestone" },
+  ];
+  return (
+    <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Milestones">
+      {chips.map((chip) => {
+        const active = selected === chip.id;
+        return (
+          <button
+            key={chip.id ?? "all"}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onSelect(chip.id)}
+            className={cn(
+              "inline-flex max-w-64 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+              active ? "text-foreground" : "border-border text-muted-foreground hover:text-foreground",
+            )}
+            style={active ? { borderColor: color, backgroundColor: `${color}1f` } : undefined}
+          >
+            {chip.id !== null && chip.id !== "none" ? <Icon name="Target" className="size-3 shrink-0" /> : null}
+            <span className="truncate">{chip.label}</span>
+            <span className="shrink-0 text-muted-foreground">{count(chip.id)}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -58,6 +58,7 @@ const issueSummarySchema = z.object({
   team: z.object({ id: z.string(), key: z.string(), name: z.string() }),
   assignee: userSchema.nullable(),
   project: z.object({ id: z.string(), name: z.string() }).nullable(),
+  milestone: z.object({ id: z.string(), name: z.string() }).nullable(),
   labels: z.array(labelSchema),
 });
 export type IssueSummary = z.infer<typeof issueSummarySchema>;
@@ -270,6 +271,7 @@ const ISSUE_SUMMARY_FIELDS = `
   team { id key name }
   assignee { ${USER_FIELDS} }
   project { id name }
+  milestone: projectMilestone { id name }
   labels(first: 20) { nodes { id name color } }
 `;
 
