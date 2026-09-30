@@ -19,6 +19,8 @@ import {
 } from "./shared";
 import { useIssueLinks } from "./links";
 import { TriageDialog } from "./Triage";
+import { EMPTY_FILTERS, FilterBar, activeFilterCount, matchesFilters } from "./Filters";
+import type { IssueFilters } from "../projects";
 
 // "linked" is local: the issues that have at least one BB thread.
 type ListScope = Exclude<IssueScope, "all"> | "linked";
@@ -65,8 +67,10 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
   const [issues, setIssues] = useState<IssueSummary[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [triageOpen, setTriageOpen] = useState(false);
+  const [filters, setFilters] = useState<IssueFilters>(EMPTY_FILTERS);
+  // Stable key so a new but equal filter object doesn't refetch.
+  const filtersKey = JSON.stringify(filters);
 
   // Sorted so a new Map instance with the same keys doesn't refetch.
   const linkedKey = [...links.byIssue.keys()].sort().join(",");
@@ -81,8 +85,8 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
             .call("issues_by_identifiers", {
               identifiers: linkedDependency === "" ? [] : linkedDependency.split(",").slice(0, 100),
             })
-            .then(({ issues }) => ({ issues: filterLocally(issues, includeCompleted, query) }))
-        : rpc.call("issues_list", { scope, includeCompleted, query });
+            .then(({ issues }) => ({ issues: filterLocally(issues, includeCompleted, query, JSON.parse(filtersKey)) }))
+        : rpc.call("issues_list", { scope, includeCompleted, query, filters: JSON.parse(filtersKey) });
     request.then(
       (result) => {
         if (cancelled) return;
@@ -99,28 +103,9 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
     return () => {
       cancelled = true;
     };
-  }, [rpc, scope, includeCompleted, query, linkedDependency]);
+  }, [rpc, scope, includeCompleted, query, linkedDependency, filtersKey]);
 
   useEffect(() => load(), [load]);
-
-  const groups = useMemo(
-    () =>
-      issues === null
-        ? []
-        : groupByState(issues).map((group) => ({
-            ...group,
-            issues: [...group.issues].sort(byPriority),
-          })),
-    [issues],
-  );
-
-  const toggleGroup = (key: string) =>
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
 
   return (
     <div>
@@ -178,6 +163,7 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
         </Button>
       </div>
 
+      <FilterBar filters={filters} onChange={setFilters} />
       <ErrorLine error={error} />
       <TriageDialog
         open={triageOpen}
@@ -187,54 +173,95 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
         onApplied={load}
       />
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-4">
         {issues === null ? (
           error === null ? <EmptyState>Loading issues…</EmptyState> : null
-        ) : issues.length === 0 ? (
-          <EmptyState>No issues here.</EmptyState>
         ) : (
-          groups.map((group) => {
-            const isCollapsed = collapsed.has(group.key);
-            return (
-              <section key={group.key}>
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(group.key)}
-                  aria-expanded={!isCollapsed}
-                  className="flex w-full items-center gap-2 px-1 py-1.5 text-sm font-medium"
-                >
-                  <Icon
-                    name="ChevronRight"
-                    className={cn("size-3.5 text-muted-foreground transition-transform", !isCollapsed && "rotate-90")}
-                  />
-                  <StateIcon state={group.state} />
-                  {group.state.name}
-                  <span className="text-muted-foreground">{group.issues.length}</span>
-                </button>
-                {isCollapsed ? null : (
-                  <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
-                    {group.issues.map((issue) => (
-                      <IssueRow
-                        key={issue.id}
-                        issue={issue}
-                        threadCount={links.byIssue.get(issue.identifier)?.length ?? 0}
-                        onOpen={() => onOpen(issue.identifier)}
-                      />
-                    ))}
-                  </ul>
-                )}
-              </section>
-            );
-          })
+          <IssueGroups
+            issues={issues}
+            threadCount={(identifier) => links.byIssue.get(identifier)?.length ?? 0}
+            onOpen={onOpen}
+            emptyLabel={activeFilterCount(filters) > 0 ? "No issues match these filters." : "No issues here."}
+          />
         )}
       </div>
     </div>
   );
 }
 
-function filterLocally(issues: IssueSummary[], includeCompleted: boolean, query: string): IssueSummary[] {
+/** Issues grouped by workflow state (Linear's board order), each group collapsible. */
+export function IssueGroups({
+  issues,
+  threadCount,
+  onOpen,
+  emptyLabel = "No issues here.",
+}: {
+  issues: IssueSummary[];
+  threadCount: (identifier: string) => number;
+  onOpen: (identifier: string) => void;
+  emptyLabel?: string;
+}) {
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const groups = useMemo(
+    () => groupByState(issues).map((group) => ({ ...group, issues: [...group.issues].sort(byPriority) })),
+    [issues],
+  );
+  const toggleGroup = (key: string) =>
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  if (issues.length === 0) return <EmptyState>{emptyLabel}</EmptyState>;
+  return (
+    <div className="space-y-4">
+      {groups.map((group) => {
+        const isCollapsed = collapsed.has(group.key);
+        return (
+          <section key={group.key}>
+            <button
+              type="button"
+              onClick={() => toggleGroup(group.key)}
+              aria-expanded={!isCollapsed}
+              className="flex w-full items-center gap-2 px-1 py-1.5 text-sm font-medium"
+            >
+              <Icon
+                name="ChevronRight"
+                className={cn("size-3.5 text-muted-foreground transition-transform", !isCollapsed && "rotate-90")}
+              />
+              <StateIcon state={group.state} />
+              {group.state.name}
+              <span className="text-muted-foreground">{group.issues.length}</span>
+            </button>
+            {isCollapsed ? null : (
+              <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+                {group.issues.map((issue) => (
+                  <IssueRow
+                    key={issue.id}
+                    issue={issue}
+                    threadCount={threadCount(issue.identifier)}
+                    onOpen={() => onOpen(issue.identifier)}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function filterLocally(
+  issues: IssueSummary[],
+  includeCompleted: boolean,
+  query: string,
+  filters: IssueFilters,
+): IssueSummary[] {
   const needle = query.toLowerCase();
-  return issues.filter(
+  return issues.filter(matchesFilters(filters)).filter(
     (issue) =>
       (includeCompleted || (issue.state.type !== "completed" && issue.state.type !== "canceled")) &&
       (needle === "" || issue.title.toLowerCase().includes(needle) || issue.identifier.toLowerCase().includes(needle)),

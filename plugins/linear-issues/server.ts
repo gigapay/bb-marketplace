@@ -6,6 +6,20 @@ import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { hostContract, hostSignals } from "./contract.js";
 import { groupCommentThreads } from "./shared/comments.js";
+import {
+  FILTER_OPTIONS_QUERY,
+  PROJECTS_QUERY,
+  PROJECT_QUERY,
+  filterOptionsSchema,
+  flattenFilterOptions,
+  flattenProject,
+  flattenProjectDetail,
+  issueFilterClauses,
+  issueFiltersSchema,
+  projectDetailSchema,
+  projectSummarySchema,
+  type IssueFilters,
+} from "./projects.js";
 import { registerLinearWorktree } from "./worktree/provider.js";
 import { triageIssue, type TriageContext, type TriageProposal } from "./triage/engine.js";
 import { applyIssueUpdate, loadTriageContext, loadTriageIssues, openRouterJev } from "./triage/linear.js";
@@ -130,9 +144,22 @@ export const rpcContract = defineRpcContract({
         scope: scopeSchema,
         includeCompleted: z.boolean(),
         query: z.string().trim().max(200),
+        filters: issueFiltersSchema.optional(),
       })
       .strict(),
     output: z.object({ issues: z.array(issueSummarySchema) }),
+  },
+  filter_options: {
+    input: z.null(),
+    output: filterOptionsSchema,
+  },
+  projects_list: {
+    input: z.object({ mine: z.boolean(), includeClosed: z.boolean() }).strict(),
+    output: z.object({ projects: z.array(projectSummarySchema) }),
+  },
+  project_get: {
+    input: z.object({ id: z.string().min(1).max(100) }).strict(),
+    output: projectDetailSchema,
   },
   issue_get: {
     input: z.object({ id: z.string().min(1).max(100) }).strict(),
@@ -438,8 +465,11 @@ export default async function plugin(bb: BbPluginApi) {
     scope: IssueScope,
     includeCompleted: boolean,
     query: string,
+    filters?: IssueFilters,
   ): Promise<IssueSummary[]> {
     const filter = openIssuesFilter(includeCompleted);
+    const clauses = filters ? issueFilterClauses(filters) : [];
+    if (clauses.length) filter.and = clauses;
     if (query !== "") {
       filter.or = [
         { title: { containsIgnoreCase: query } },
@@ -681,9 +711,24 @@ export default async function plugin(bb: BbPluginApi) {
         return { configured: true, viewer: null, error: errorMessage(cause) };
       }
     },
-    issues_list: async ({ scope, includeCompleted, query }) => ({
-      issues: await listIssues(scope, includeCompleted, query),
+    issues_list: async ({ scope, includeCompleted, query, filters }) => ({
+      issues: await listIssues(scope, includeCompleted, query, filters),
     }),
+    filter_options: async () => flattenFilterOptions(await linear(FILTER_OPTIONS_QUERY)),
+    projects_list: async ({ mine, includeClosed }) => {
+      const clauses: Record<string, unknown>[] = [];
+      if (mine) clauses.push({ or: [{ lead: { isMe: { eq: true } } }, { members: { some: { isMe: { eq: true } } } }] });
+      if (!includeClosed) clauses.push({ status: { type: { nin: ["completed", "canceled"] } } });
+      const data = await linear<{ projects: { nodes: Parameters<typeof flattenProject>[0][] } }>(PROJECTS_QUERY, {
+        filter: clauses.length ? { and: clauses } : null,
+      });
+      return { projects: data.projects.nodes.map(flattenProject) };
+    },
+    project_get: async ({ id }) => {
+      const data = await linear<{ project: Parameters<typeof flattenProjectDetail>[0] | null }>(PROJECT_QUERY, { id });
+      if (data.project === null) throw new Error("Project not found");
+      return flattenProjectDetail(data.project);
+    },
     issue_get: ({ id }) => getIssue(id),
     comment_create: async ({ issueId, body, parentId }) => {
       const data = await linear<{ commentCreate: { success: boolean; comment: { id: string } | null } }>(

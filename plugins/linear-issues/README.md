@@ -70,6 +70,8 @@ A thread is linked to an issue when it was started from a ticket (issue page or 
 
 - `server.ts` is the backend. It holds the Linear GraphQL client, the RPC contract used by the page, and the `bb linear-issues` CLI.
 - `app.tsx` is the page entry. The route `/plugins/linear-issues/issues/<IDENTIFIER>` opens an issue directly.
+- `views/Filters.tsx` is the filter bar under the list: labels (with their Linear colours and groups), priority, and project (including "No project"). Filters are OR within a kind and AND across kinds. The server turns them into an `IssueFilter` (`projects.ts`, `issueFilterClauses`).
+- `views/Projects.tsx` is the Projects tab and the project page. The list is grouped by status, with health, progress and target date, and can show only your projects (lead or member) or include completed ones. The project page has an overview (milestones, the full description from `content`, the latest update), every project update with its health, and the project's issues grouped like the issue list. Routes are `/plugins/linear-issues/issues/projects` and `/plugins/linear-issues/issues/projects/<id>`.
 - `views/IssueList.tsx` shows the list. It has Assigned, Created, Subscribed and With threads scopes, search, a "show done" toggle, and a thread count per issue. Issues are grouped by workflow state and sorted by priority.
 - `views/IssueDetail.tsx` shows one issue: its metadata, description, sub-issues and comments, its linked threads, and BB's new-thread composer seeded with the ticket and the last project used for that team.
 - `views/ThreadHeaderLink.tsx` is the chip in the thread header. Clicking a linked chip opens the "Linear issue" side-panel tab, and an unlinked one offers to link.

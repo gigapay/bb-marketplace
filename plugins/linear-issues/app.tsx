@@ -7,6 +7,7 @@ import type { PluginNavPanelProps } from "@get-bb/plugin-sdk/app";
 import { EmptyState, ErrorLine, errorText } from "./views/shared";
 import { IssueDetail } from "./views/IssueDetail";
 import { IssueList } from "./views/IssueList";
+import { ProjectDetailView, ProjectList } from "./views/Projects";
 import { HomeSection } from "./views/HomeSection";
 import { ThreadHeaderLink } from "./views/ThreadHeaderLink";
 import { THREAD_PANEL_ACTION_ID, ThreadLinearPanel } from "./views/ThreadLinearPanel";
@@ -20,6 +21,35 @@ const PANEL_PATH = "issues";
 const LINEAR_ICON = "linear-issues/linear";
 
 
+let returnTo = "";
+
+function PageTabs({ active, onSelect }: { active: "issues" | "projects"; onSelect: (path: string) => void }) {
+  const tabs = [
+    { id: "issues", label: "Issues", path: "" },
+    { id: "projects", label: "Projects", path: "projects" },
+  ] as const;
+  return (
+    <div role="tablist" aria-label="Linear" className="mb-3 flex gap-1 border-b border-border">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          aria-selected={active === tab.id}
+          onClick={() => onSelect(tab.path)}
+          className={
+            active === tab.id
+              ? "-mb-px border-b-2 border-[#5E6AD2] px-3 py-1.5 text-sm font-medium text-foreground"
+              : "-mb-px border-b-2 border-transparent px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+          }
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function LinearPage({ subPath }: PluginNavPanelProps) {
   const rpc = useRpc<typeof rpcContract>();
   const navigate = useBbNavigate();
@@ -30,9 +60,15 @@ function LinearPage({ subPath }: PluginNavPanelProps) {
     rpc.call("status").then(setStatus, (cause) => setError(errorText(cause)));
   }, [rpc]);
 
-  const identifier = decodeURIComponent(subPath.split("/")[0] ?? "");
-  const openIssue = (id: string) => navigate.toPluginPanel(PANEL_PATH, { subPath: id });
-  const backToList = () => navigate.toPluginPanel(PANEL_PATH, { subPath: "" });
+  // Routes: "" issues · "projects" · "projects/<id>" · "<IDENTIFIER>" an issue.
+  const parts = subPath.split("/").filter(Boolean).map(decodeURIComponent);
+  const identifier = parts[0] ?? "";
+  const go = (path: string) => navigate.toPluginPanel(PANEL_PATH, { subPath: path });
+  // An issue opened from a project goes back to that project, not the issue list.
+  const openIssueFrom = (from: string) => (id: string) => {
+    returnTo = from;
+    go(id);
+  };
 
   return (
     <div className="h-full min-h-0 flex-1 overflow-y-auto">
@@ -47,10 +83,24 @@ function LinearPage({ subPath }: PluginNavPanelProps) {
           </EmptyState>
         ) : status.viewer === null ? (
           <ErrorLine error={status.error ?? "Could not reach Linear."} />
+        ) : parts[0] === "projects" && parts[1] ? (
+          <ProjectDetailView
+            projectId={parts[1]}
+            onBack={() => go("projects")}
+            onOpenIssue={openIssueFrom(`projects/${parts[1]}`)}
+          />
+        ) : parts[0] === "projects" ? (
+          <>
+            <PageTabs active="projects" onSelect={go} />
+            <ProjectList onOpen={(id) => go(`projects/${encodeURIComponent(id)}`)} />
+          </>
         ) : IDENTIFIER_PATTERN.test(identifier.toUpperCase()) ? (
-          <IssueDetail identifier={identifier.toUpperCase()} onBack={backToList} />
+          <IssueDetail identifier={identifier.toUpperCase()} onBack={() => go(returnTo)} />
         ) : (
-          <IssueList onOpen={openIssue} />
+          <>
+            <PageTabs active="issues" onSelect={go} />
+            <IssueList onOpen={openIssueFrom("")} />
+          </>
         )}
       </div>
     </div>

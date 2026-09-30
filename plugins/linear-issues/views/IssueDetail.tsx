@@ -44,7 +44,7 @@ export function IssueDetail({ identifier, onBack }: { identifier: string; onBack
     <div>
       <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={onBack}>
         <Icon name="ArrowLeft" className="size-4" />
-        Issues
+        Back
       </Button>
       <ErrorLine error={error} />
       {issue === null ? (
@@ -150,7 +150,17 @@ function IssueBody({ issue, onChanged }: { issue: Issue; onChanged: () => void }
         </Meta>
         <Meta label="Assignee">{issue.assignee?.name ?? "Unassigned"}</Meta>
         <Meta label="Team">{issue.team.name}</Meta>
-        {issue.project ? <Meta label="Project">{issue.project.name}</Meta> : null}
+        {issue.project ? (
+          <Meta label="Project">
+            <button
+              type="button"
+              onClick={() => navigate.toPluginPanel("issues", { subPath: `projects/${issue.project!.id}` })}
+              className="truncate underline-offset-2 hover:underline"
+            >
+              {issue.project.name}
+            </button>
+          </Meta>
+        ) : null}
         {issue.cycle ? <Meta label="Cycle">{issue.cycle.name ?? `Cycle ${issue.cycle.number}`}</Meta> : null}
         {issue.estimate !== null ? <Meta label="Estimate">{issue.estimate}</Meta> : null}
         {issue.dueDate ? <Meta label="Due">{issue.dueDate}</Meta> : null}
