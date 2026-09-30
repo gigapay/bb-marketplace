@@ -66,11 +66,14 @@ export function UpdateComposer({
   useEffect(() => {
     if (!drafting || threadId === null) return;
     let cancelled = false;
+    // A blip while polling shouldn't abandon a draft the agent is still writing.
+    let failures = 0;
     const tick = async () => {
       if (cancelled) return;
       try {
         const result = await rpc.call("update_draft_get", { threadId });
         if (cancelled) return;
+        failures = 0;
         if (result.status === "ready" && result.draft) {
           setBody(result.draft.body);
           if (result.draft.health) setHealth(result.draft.health);
@@ -90,11 +93,13 @@ export function UpdateComposer({
           return;
         }
       } catch (cause) {
-        if (!cancelled) {
+        if (cancelled) return;
+        failures += 1;
+        if (failures >= 3) {
           setDrafting(false);
-          toast.error(errorText(cause));
+          toast.error(`${errorText(cause)}. The agent may still be writing: use "Pull latest draft" in a moment.`);
+          return;
         }
-        return;
       }
       setTimeout(tick, POLL_MS);
     };

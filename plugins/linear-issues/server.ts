@@ -472,17 +472,41 @@ export default async function plugin(bb: BbPluginApi) {
     return typeof apiKey === "string" && apiKey.trim() !== "" ? apiKey.trim() : null;
   }
 
+  /**
+   * Reads are retried on network errors and on Linear's 429/5xx. Mutations
+   * aren't: a dropped response may still have been applied, and a retry
+   * would post the same comment or update twice.
+   */
+  async function sendToLinear(apiKey: string, query: string, variables: Record<string, unknown>): Promise<Response> {
+    const retryable = !/^\s*mutation\b/.test(query);
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const response = await fetch(LINEAR_API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: apiKey },
+          body: JSON.stringify({ query, variables }),
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (retryable && attempt < 2 && (response.status === 429 || response.status >= 500)) {
+          await sleep(400 * 2 ** attempt);
+          continue;
+        }
+        return response;
+      } catch (cause) {
+        if (!retryable || attempt >= 2) {
+          throw new Error(`Couldn't reach Linear (${errorMessage(cause)}). Check your connection and try again.`);
+        }
+        await sleep(400 * 2 ** attempt);
+      }
+    }
+  }
+
   async function linear<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
     const apiKey = await readApiKey();
     if (apiKey === null) {
       throw new Error("Linear API key is not configured. Set it in the plugin settings.");
     }
-    const response = await fetch(LINEAR_API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: apiKey },
-      body: JSON.stringify({ query, variables }),
-      signal: AbortSignal.timeout(20_000),
-    });
+    const response = await sendToLinear(apiKey, query, variables);
     const body = (await response.json().catch(() => null)) as {
       data?: T;
       errors?: { message: string }[];
@@ -760,21 +784,39 @@ export default async function plugin(bb: BbPluginApi) {
       return { projects: data.projects.nodes.map(flattenProject) };
     },
     update_draft_start: async ({ projectId, notes }) => {
-      const data = await linear<{ project: RawUpdateContext | null }>(PROJECT_UPDATE_CONTEXT_QUERY, { id: projectId });
+      // Each step names itself in the error, so "fetch failed" never reaches
+      // the user without saying what was being fetched.
+      const step = async <T>(label: string, run: () => Promise<T>): Promise<T> => {
+        try {
+          return await run();
+        } catch (cause) {
+          bb.log.error(`update draft: ${label} failed: ${errorMessage(cause)}`);
+          throw new Error(`${label} failed: ${errorMessage(cause)}`);
+        }
+      };
+      const data = await step("Reading the project from Linear", () =>
+        linear<{ project: RawUpdateContext | null }>(PROJECT_UPDATE_CONTEXT_QUERY, { id: projectId }),
+      );
       if (data.project === null) throw new Error("Project not found");
-      const context = buildUpdateContext(data.project);
+      const project = data.project;
+      const context = buildUpdateContext(project);
       // Drafting needs no code checkout, so it runs outside any project.
-      const projects = await bb.sdk.projects.list({ includePersonal: true });
-      const personal = projects.find((project) => project.kind === "personal");
-      if (!personal) throw new Error("BB has no personal project to run the drafting agent in");
-      const thread = await bb.sdk.threads.spawn({
-        projectId: personal.id,
-        environment: { type: "project-default" },
-        prompt: buildUpdatePrompt(data.project.name, context, notes),
-        title: `Project update draft: ${data.project.name}`,
-        visibility: "hidden",
-        pluginMetadata: { kind: "project-update-draft", projectId },
+      const personal = await step("Finding BB's personal project", async () => {
+        const projects = await bb.sdk.projects.list({ includePersonal: true });
+        const found = projects.find((candidate) => candidate.kind === "personal");
+        if (!found) throw new Error("BB has no personal project to run the drafting agent in");
+        return found;
       });
+      const thread = await step("Starting the drafting agent", () =>
+        bb.sdk.threads.spawn({
+          projectId: personal.id,
+          environment: { type: "project-default" },
+          prompt: buildUpdatePrompt(project.name, context, notes),
+          title: `Project update draft: ${project.name}`,
+          visibility: "hidden",
+          pluginMetadata: { kind: "project-update-draft", projectId },
+        }),
+      );
       return { threadId: thread.id };
     },
     update_draft_get: async ({ threadId }) => {
@@ -1069,6 +1111,10 @@ function formatIssueText(issue: IssueDetail): string {
     }
   }
   return lines.join("\n");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function bounded(text: string): string {
