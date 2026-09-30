@@ -38,7 +38,8 @@ export function DiffWithComments(props: PluginDiffRendererProps) {
   return <AnnotatedDiff {...props} threadId={threadId} prKey={prKey} threads={threads} onChanged={refresh} />;
 }
 
-function AnnotatedDiff({
+/** A single-file patch with review threads under their lines. Also used by the PR Diff tab. */
+export function AnnotatedDiff({
   patch,
   view,
   overflow,
@@ -47,7 +48,17 @@ function AnnotatedDiff({
   prKey,
   threads,
   onChanged,
-}: PluginDiffRendererProps & { threadId: string; prKey: string; threads: FeedItem[]; onChanged: () => Promise<void> }) {
+}: {
+  patch: string;
+  view: PluginDiffRendererProps["view"];
+  overflow: PluginDiffRendererProps["overflow"];
+  showLineNumbers: boolean;
+  /** null outside a thread: no "Send to thread" button then. */
+  threadId: string | null;
+  prKey: string;
+  threads: FeedItem[];
+  onChanged: () => Promise<void>;
+}) {
   const codeTheme = useCodeTheme();
   const annotations = useMemo<DiffLineAnnotation<FeedItem>[]>(
     () =>
@@ -86,7 +97,7 @@ function AnnotatedDiff({
                   prKey={prKey}
                   onChanged={onChanged}
                   showPath={false}
-                  actions={annotation.metadata.isResolved ? null : <SendButton item={annotation.metadata} threadId={threadId} prKey={prKey} />}
+                  actions={annotation.metadata.isResolved || threadId === null ? null : <SendButton item={annotation.metadata} threadId={threadId} prKey={prKey} />}
                 />
               </div>
             ) : null
@@ -120,7 +131,7 @@ function SendButton({ item, threadId, prKey }: { item: FeedItem; threadId: strin
       disabled={sending}
       className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-50"
     >
-      <Icon name="Send" className="size-3.5" />
+      <Icon name="ArrowUpRight" className="size-3.5" />
       Send to thread
     </button>
   );

@@ -10,6 +10,7 @@ import { z } from "zod";
 import { PR_SCOPES, buildPrSearch, type PrScope } from "./shared/search";
 import { PR_DETAIL_QUERY, actorSchema, normalizeDetail, prDetailSchema, type PrDetail, type RawPrDetail } from "./detail";
 import { parsePrKey, prKey, type PrRef } from "./shared/pr-ref";
+import { PR_DIFF_META_QUERY, SHA_PATTERN, diffRangeSchema, prDiffSchema, toDiffFiles, type DiffFile, type PrDiff, type RawDiffMeta, type RestFile } from "./diff";
 import { PR_CHECKS_QUERY, normalizeChecks, prChecksSchema, type PrChecks, type RawPrChecks } from "./checks";
 import { buildCommentsPrompt } from "./shared/prompt";
 
@@ -100,6 +101,15 @@ export const rpcContract = defineRpcContract({
   pr_checks: {
     input: z.object({ key: prKeySchema }).strict(),
     output: prChecksSchema,
+  },
+  pr_diff: {
+    input: z.object({ key: prKeySchema, range: diffRangeSchema }).strict(),
+    output: prDiffSchema,
+  },
+  // GitHub's per-file "Viewed" checkbox, shown as "Reviewed".
+  file_viewed: {
+    input: z.object({ key: prKeySchema, path: z.string().min(1).max(1000), viewed: z.boolean() }).strict(),
+    output: z.object({ ok: z.literal(true) }),
   },
   thread_resolve: {
     input: z.object({ key: prKeySchema, itemId: z.string().min(1).max(200), resolved: z.boolean() }).strict(),
@@ -257,6 +267,94 @@ export default async function plugin(bb: BbPluginApi) {
     }
   }
 
+  async function githubGet<T>(path: string): Promise<T> {
+    const auth = await resolveToken();
+    if (auth === null) throw new Error("No GitHub token.");
+    const response = await fetch(`${GITHUB_API_URL}${path}`, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${auth.token}`,
+        "User-Agent": "bb-plugin-github-kit",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) {
+      const detail = (await response.json().catch(() => null)) as { message?: string } | null;
+      throw new Error(`GitHub GET failed with HTTP ${response.status}${detail?.message ? `: ${detail.message}` : ""}`);
+    }
+    return (await response.json()) as T;
+  }
+
+  async function diffMeta(ref: PrRef) {
+    // Viewed states page by 100; the rest of the query rides on the first page.
+    let after: string | null = null;
+    let first: NonNullable<NonNullable<RawDiffMeta["repository"]>["pullRequest"]> | null = null;
+    let login = "";
+    const viewed = new Map<string, DiffFile["viewed"]>();
+    for (let page = 0; page < 30; page++) {
+      const data: RawDiffMeta = await github<RawDiffMeta>(PR_DIFF_META_QUERY, { owner: ref.owner, name: ref.name, number: ref.number, after });
+      const pr = data.repository?.pullRequest ?? null;
+      if (pr === null) throw new Error(`Pull request ${prKey(ref)} not found`);
+      first ??= pr;
+      login = data.viewer.login;
+      for (const node of pr.files.nodes) viewed.set(node.path, node.viewerViewedState);
+      if (!pr.files.pageInfo.hasNextPage) break;
+      after = pr.files.pageInfo.endCursor;
+    }
+    const pr = first!;
+    const shas = new Set(pr.commits.nodes.map((node) => node.commit.oid));
+    const mine = pr.reviews.nodes.filter((review) => review.author?.login === login && review.commit !== null);
+    const lastReviewSha = mine.length > 0 ? mine[mine.length - 1]!.commit!.oid : null;
+    return {
+      id: pr.id,
+      headSha: pr.headRefOid,
+      viewed,
+      lastReviewSha: lastReviewSha !== null && shas.has(lastReviewSha) ? lastReviewSha : null,
+      commits: pr.commits.nodes.map(({ commit }) => ({
+        sha: commit.oid,
+        shortSha: commit.abbreviatedOid,
+        message: commit.messageHeadline,
+        author: commit.author?.user?.login ?? commit.author?.name ?? "unknown",
+        committedAt: commit.committedDate,
+      })),
+    };
+  }
+
+  async function getDiff(ref: PrRef, range: z.infer<typeof diffRangeSchema>): Promise<PrDiff> {
+    const meta = await diffMeta(ref);
+    const repo = `/repos/${ref.owner}/${ref.name}`;
+    let files: RestFile[] = [];
+    let truncated = false;
+    if (range.kind === "all") {
+      // GitHub lists at most 3000 files, 100 per page.
+      for (let page = 1; page <= 30; page++) {
+        const batch = await githubGet<RestFile[]>(`${repo}/pulls/${ref.number}/files?per_page=100&page=${page}`);
+        files.push(...batch);
+        if (batch.length < 100) break;
+        if (page === 30) truncated = true;
+      }
+    } else {
+      let path: string;
+      if (range.kind === "commit") {
+        if (!meta.commits.some((commit) => commit.sha.startsWith(range.sha))) throw new Error("That commit isn't part of this pull request.");
+        path = `${repo}/commits/${range.sha}`;
+      } else {
+        if (meta.lastReviewSha === null) throw new Error("You haven't reviewed this pull request yet.");
+        path = `${repo}/compare/${meta.lastReviewSha}...${meta.headSha}`;
+      }
+      // Both endpoints cap at 300 files.
+      const result = await githubGet<{ files?: RestFile[] }>(path);
+      files = result.files ?? [];
+      truncated = files.length >= 300;
+      // A base branch merged in since the review would show up in the
+      // compare; keep only files that are part of the PR itself.
+      if (range.kind === "since-review") files = files.filter((file) => meta.viewed.has(file.filename));
+    }
+    const { files: diffFiles, cut } = toDiffFiles(files, meta.viewed);
+    return { headSha: meta.headSha, lastReviewSha: meta.lastReviewSha, commits: meta.commits, files: diffFiles, truncated: truncated || cut };
+  }
+
   async function getPullRequest(ref: PrRef): Promise<PrDetail> {
     const data = await github<{ repository: { pullRequest: RawPrDetail | null } | null }>(PR_DETAIL_QUERY, {
       owner: ref.owner,
@@ -364,6 +462,18 @@ export default async function plugin(bb: BbPluginApi) {
       return { ok: true as const };
     },
     pr_checks: ({ key }) => getChecks(key),
+    pr_diff: ({ key, range }) => getDiff(key, range),
+    file_viewed: async ({ key, path, viewed }) => {
+      const data = await github<{ repository: { pullRequest: { id: string } | null } | null }>(
+        `query Id($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } } }`,
+        { owner: key.owner, name: key.name, number: key.number },
+      );
+      const id = data.repository?.pullRequest?.id;
+      if (id === undefined) throw new Error(`Pull request ${prKey(key)} not found`);
+      const mutation = viewed ? "markFileAsViewed" : "unmarkFileAsViewed";
+      await github(`mutation Viewed($id: ID!, $path: String!) { ${mutation}(input: { pullRequestId: $id, path: $path }) { clientMutationId } }`, { id, path });
+      return { ok: true as const };
+    },
     thread_resolve: async ({ key, itemId, resolved }) => {
       // Re-read the PR so only one of its own review threads can be touched.
       const item = (await getPullRequest(key)).feed.find((candidate) => candidate.id === itemId);

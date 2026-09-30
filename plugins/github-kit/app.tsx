@@ -11,6 +11,7 @@ import { PullRequestList } from "./views/PullRequestList";
 import { THREAD_PANEL_ACTION_ID, ThreadPrPanel } from "./views/ThreadPrPanel";
 import { DiffWithComments } from "./views/DiffWithComments";
 import { HomeSection } from "./views/HomeSection";
+import { SidebarPrBadges } from "./views/SidebarPrBadges";
 import { parsePrKey, prKey } from "./shared/pr-ref";
 import type { rpcContract } from "./server";
 
@@ -72,6 +73,10 @@ export default definePluginApp((app) => {
     icon: "github-kit/github",
     path: PANEL_PATH,
     component: GitHubPage,
+  });
+  app.slots.experimental_appOverlay({
+    id: "sidebar-pr-badges",
+    component: SidebarPrBadges,
   });
   app.slots.homepageSection({
     id: "reviews",

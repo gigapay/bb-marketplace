@@ -12,6 +12,6 @@
     "skipLibCheck": false,
     "allowImportingTsExtensions": true
   },
-  "include": ["server.ts", "detail.ts", "checks.ts", "app.tsx", "components", "lib", "views", "shared"],
+  "include": ["server.ts", "detail.ts", "checks.ts", "diff.ts", "app.tsx", "components", "lib", "views", "shared"],
   "exclude": ["**/*.test.ts", "node_modules"]
 }

@@ -21,6 +21,7 @@ import type { Audience } from "../shared/audience";
 import { Composer, Discussion } from "./Discussion";
 import { usePrDetail } from "./useThreadPr";
 import { ChecksSection, usePrChecks } from "./Checks";
+import { PrDiffView } from "./PrDiffView";
 import { ChecksIcon, EmptyState, ErrorLine, LabelChip, PrStateIcon, ReviewChip, errorText, relativeTime, useDebounced } from "./shared";
 
 type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
@@ -40,6 +41,7 @@ export function PullRequestDetail({
   const { detail: pr, error, loading, refresh } = usePrDetail(prKey);
   const load = () => void refresh();
   const checks = usePrChecks(prKey);
+  const [tab, setTab] = useState<"overview" | "diff">("overview");
   // A new push changes the head commit: reload so comments and diff stats follow.
   const headSha = checks.checks?.headSha ?? null;
   const seenSha = useRef<string | null>(null);
@@ -63,20 +65,50 @@ export function PullRequestDetail({
       ) : (
         <>
           <Header pr={pr} liveChecks={checks.checks?.rollup} loading={loading} onRefresh={load} />
-          {threadId === null ? <LinkedThreads branch={pr.headRefName} /> : null}
-          <ChecksSection state={checks} />
-          <Reviewers pr={pr} rpc={rpc} onChanged={load} />
-          <Section title="Description">
-            {pr.body.trim() === "" ? (
-              <p className="text-sm text-muted-foreground">No description.</p>
-            ) : (
-              <Markdown content={pr.body} className="text-sm" />
-            )}
-          </Section>
-          <Comments pr={pr} rpc={rpc} threadId={threadId} onChanged={refresh} />
+          <div role="tablist" aria-label="Pull request view" className="flex w-fit rounded-md border border-border p-0.5">
+            {(["overview", "diff"] as const).map((id) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={tab === id}
+                onClick={() => setTab(id)}
+                className={cn(
+                  "rounded px-3 py-1 text-sm transition-colors",
+                  tab === id ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {id === "overview" ? "Overview" : `Diff · ${pr.changedFiles} files`}
+              </button>
+            ))}
+          </div>
+          {tab === "diff" ? (
+            <PrDiffView pr={pr} threadId={threadId} onChanged={refresh} compact={threadId !== null} />
+          ) : (
+            <>
+              {threadId === null ? <LinkedThreads branch={pr.headRefName} /> : null}
+              <ChecksSection state={checks} />
+              <Reviewers pr={pr} rpc={rpc} onChanged={load} />
+              <Section title="Description">
+                {pr.body.trim() === "" ? (
+                  <p className="text-sm text-muted-foreground">No description.</p>
+                ) : (
+                  <Markdown content={pr.body} className="text-sm" />
+                )}
+              </Section>
+              <Comments pr={pr} rpc={rpc} threadId={threadId} onChanged={refresh} />
+            </>
+          )}
         </>
       )}
     </div>
+  );
+}
+
+function copyLink(url: string) {
+  navigator.clipboard.writeText(url).then(
+    () => toast.success("Link copied"),
+    () => toast.error("Couldn't copy the link"),
   );
 }
 
@@ -114,6 +146,9 @@ function Header({
         </h2>
         <Button variant="ghost" size="icon" aria-label="Refresh" onClick={onRefresh} disabled={loading}>
           <Icon name="ArrowReloadHorizontal" className={cn("size-4", loading && "animate-spin")} />
+        </Button>
+        <Button variant="ghost" size="icon" aria-label="Copy link" onClick={() => copyLink(pr.url)}>
+          <Icon name="Copy" className="size-4" />
         </Button>
         <UrlLink href={pr.url} target="_blank" aria-label="Open on GitHub" className="mt-2 text-muted-foreground hover:text-foreground">
           <Icon name="ExternalLink" className="size-4" />
@@ -501,7 +536,7 @@ function Comments({
               )
             ) : null}
             <Button size="sm" onClick={send} disabled={sending || target === null}>
-              <Icon name="Send" className="size-4" />
+              <Icon name="ArrowUpRight" className="size-4" />
               Send to thread
             </Button>
           </div>
