@@ -4,7 +4,7 @@
 // comments filtered by who wrote them.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { UrlLink, useRpc } from "@get-bb/plugin-sdk/app";
+import { UrlLink, experimental_useSidebarThreads as useSidebarThreads, useRpc } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Icon } from "@/components/ui/icon";
@@ -91,6 +91,15 @@ export function PrDiffView({
     };
   }, [rpc, pr.key, range]);
   useEffect(() => load(), [load]);
+
+  // Agent notes go to this thread, or the first one working on the PR's branch.
+  const { threads: sidebarThreads } = useSidebarThreads();
+  const agentThreadId =
+    threadId ??
+    sidebarThreads.find((thread) => !thread.isHidden && !thread.isArchived && thread.environment?.branchName === pr.headRefName)?.id ??
+    null;
+  // Line comments anchor on the head commit, so only the full diff takes them.
+  const canComment = range.kind === "all" && pr.state === "OPEN";
 
   const isViewed = (file: DiffFile) => viewedOverride.get(file.path) ?? file.viewed === "VIEWED";
   const isExpanded = (file: DiffFile) => expandedOverride.get(file.path) ?? !isViewed(file);
@@ -275,6 +284,7 @@ export function PrDiffView({
                 expanded={isExpanded(file)}
                 threads={threadsByPath.get(file.path) ?? []}
                 view={view}
+                review={canComment ? { path: file.path, agentThreadId } : undefined}
                 onToggle={() => toggleExpanded(file)}
                 onViewed={(viewed) => setViewed(file, viewed)}
                 onChanged={onChanged}
@@ -296,11 +306,13 @@ function FileCard({
   expanded,
   threads,
   view,
+  review,
   onToggle,
   onViewed,
   onChanged,
 }: {
   file: DiffFile;
+  review: { path: string; agentThreadId: string | null } | undefined;
   prUrl: string;
   prKey: string;
   threadId: string | null;
@@ -364,6 +376,7 @@ function FileCard({
                 prKey={prKey}
                 threads={threads}
                 onChanged={onChanged}
+                review={review}
               />
             </div>
           </LazyMount>

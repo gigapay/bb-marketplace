@@ -6,13 +6,15 @@ import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { toast } from "sonner";
 import { PatchDiff } from "@pierre/diffs/react";
-import type { DiffLineAnnotation } from "@pierre/diffs";
+import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs";
 import { experimental_useCodeTheme as useCodeTheme, useBbContext, useRpc } from "@get-bb/plugin-sdk/app";
 import type { PluginDiffRendererProps } from "@get-bb/plugin-sdk/app";
 import { Icon } from "@/components/ui/icon";
 import type { FeedItem } from "../detail";
 import type { rpcContract } from "../server";
 import { Discussion } from "./Discussion";
+import { LineComposer, PendingComment } from "./LineComposer";
+import { useDrafts, type Draft, type LineAnchor } from "./reviewDrafts";
 import { errorText } from "./shared";
 import { usePrDetail, useThreadPrKey } from "./useThreadPr";
 
@@ -38,7 +40,16 @@ export function DiffWithComments(props: PluginDiffRendererProps) {
   return <AnnotatedDiff {...props} threadId={threadId} prKey={prKey} threads={threads} onChanged={refresh} />;
 }
 
-/** A single-file patch with review threads under their lines. Also used by the PR Diff tab. */
+type Annotation =
+  | { kind: "thread"; item: FeedItem }
+  | { kind: "draft"; draft: Draft }
+  | { kind: "composer"; anchor: LineAnchor };
+
+/**
+ * A single-file patch with review threads under their lines. With `review`
+ * set (the PR Diff tab), a "+" in the gutter opens a comment box, and
+ * pending review comments show under their lines too.
+ */
 export function AnnotatedDiff({
   patch,
   view,
@@ -48,6 +59,7 @@ export function AnnotatedDiff({
   prKey,
   threads,
   onChanged,
+  review,
 }: {
   patch: string;
   view: PluginDiffRendererProps["view"];
@@ -58,17 +70,26 @@ export function AnnotatedDiff({
   prKey: string;
   threads: FeedItem[];
   onChanged: () => Promise<void>;
+  review?: { path: string; agentThreadId: string | null };
 }) {
   const codeTheme = useCodeTheme();
-  const annotations = useMemo<DiffLineAnnotation<FeedItem>[]>(
-    () =>
-      threads.map((item) => ({
-        side: item.side === "LEFT" ? "deletions" : "additions",
-        lineNumber: item.line!,
-        metadata: item,
-      })),
-    [threads],
+  const drafts = useDrafts(prKey);
+  const [composer, setComposer] = useState<LineAnchor | null>(null);
+  const reviewPath = review?.path ?? null;
+  const fileDrafts = useMemo(
+    () => (reviewPath === null ? [] : drafts.filter((draft) => draft.anchor.path === reviewPath)),
+    [drafts, reviewPath],
   );
+
+  const annotations = useMemo<DiffLineAnnotation<Annotation>[]>(() => {
+    const side = (value: "LEFT" | "RIGHT") => (value === "LEFT" ? ("deletions" as const) : ("additions" as const));
+    return [
+      ...threads.map((item) => ({ side: side(item.side ?? "RIGHT"), lineNumber: item.line!, metadata: { kind: "thread" as const, item } })),
+      ...fileDrafts.map((draft) => ({ side: side(draft.anchor.side), lineNumber: draft.anchor.line, metadata: { kind: "draft" as const, draft } })),
+      ...(composer ? [{ side: side(composer.side), lineNumber: composer.line, metadata: { kind: "composer" as const, anchor: composer } }] : []),
+    ];
+  }, [threads, fileDrafts, composer]);
+
   const options = useMemo(
     () => ({
       diffStyle: view,
@@ -77,31 +98,63 @@ export function AnnotatedDiff({
       disableFileHeader: true,
       themeType: codeTheme.mode,
       theme: codeTheme.name,
+      ...(reviewPath !== null
+        ? {
+            enableGutterUtility: true,
+            enableLineSelection: true,
+            lineHoverHighlight: "number" as const,
+            onGutterUtilityClick: (range: SelectedLineRange) => {
+              // Drag-selecting lines comments on the whole range, like GitHub.
+              const start = Math.min(range.start, range.end);
+              const end = Math.max(range.start, range.end);
+              setComposer({
+                path: reviewPath,
+                line: end,
+                startLine: start === end ? null : start,
+                side: (range.endSide ?? range.side) === "deletions" ? "LEFT" : "RIGHT",
+              });
+            },
+          }
+        : {}),
     }),
-    [view, overflow, showLineNumbers, codeTheme.mode, codeTheme.name],
+    [view, overflow, showLineNumbers, codeTheme.mode, codeTheme.name, reviewPath],
   );
 
   return (
     <div className="overflow-x-auto">
       <div className="w-full max-w-full" style={DIFF_VIEW_STYLE}>
-        <PatchDiff<FeedItem>
+        <PatchDiff<Annotation>
           patch={patch}
           options={options}
           lineAnnotations={annotations}
-          renderAnnotation={(annotation) =>
-            annotation.metadata ? (
+          renderAnnotation={(annotation) => {
+            const value = annotation.metadata;
+            if (!value) return null;
+            return (
               // The attribute scopes the plugin's CSS to this subtree inside BB's diff.
               <div data-bb-plugin="github-kit" className="px-3 py-2 font-sans">
-                <Discussion
-                  item={annotation.metadata}
-                  prKey={prKey}
-                  onChanged={onChanged}
-                  showPath={false}
-                  actions={annotation.metadata.isResolved || threadId === null ? null : <SendButton item={annotation.metadata} threadId={threadId} prKey={prKey} />}
-                />
+                {value.kind === "thread" ? (
+                  <Discussion
+                    item={value.item}
+                    prKey={prKey}
+                    onChanged={onChanged}
+                    showPath={false}
+                    actions={value.item.isResolved || threadId === null ? null : <SendButton item={value.item} threadId={threadId} prKey={prKey} />}
+                  />
+                ) : value.kind === "draft" ? (
+                  <PendingComment draft={value.draft} prKey={prKey} />
+                ) : (
+                  <LineComposer
+                    anchor={value.anchor}
+                    prKey={prKey}
+                    agentThreadId={review?.agentThreadId ?? null}
+                    onDone={() => setComposer(null)}
+                    onPosted={onChanged}
+                  />
+                )}
               </div>
-            ) : null
-          }
+            );
+          }}
         />
       </div>
     </div>

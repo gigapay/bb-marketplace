@@ -56,6 +56,17 @@ const prKeySchema = z
   });
 const loginSchema = z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]|\[bot\]){0,60}$/, "Invalid GitHub login");
 const threadIdSchema = z.string().min(1).max(100);
+// A diff line anchor, GitHub's shape: RIGHT is the new code, LEFT the old.
+const lineAnchorSchema = z
+  .object({
+    path: z.string().min(1).max(1000),
+    line: z.number().int().positive(),
+    startLine: z.number().int().positive().nullable(),
+    side: z.enum(["LEFT", "RIGHT"]),
+  })
+  .strict()
+  .refine((anchor) => anchor.startLine === null || anchor.startLine < anchor.line, "startLine must come before line");
+const reviewBodySchema = z.string().trim().min(1).max(20_000);
 
 export const rpcContract = defineRpcContract({
   status: {
@@ -109,6 +120,29 @@ export const rpcContract = defineRpcContract({
   // GitHub's per-file "Viewed" checkbox, shown as "Reviewed".
   file_viewed: {
     input: z.object({ key: prKeySchema, path: z.string().min(1).max(1000), viewed: z.boolean() }).strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
+  // One review comment posted right away, outside any review.
+  review_comment: {
+    input: z.object({ key: prKeySchema, anchor: lineAnchorSchema, body: reviewBodySchema }).strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
+  // Submits a review with the comments drafted in the diff.
+  review_submit: {
+    input: z
+      .object({
+        key: prKeySchema,
+        event: z.enum(["COMMENT", "APPROVE", "REQUEST_CHANGES"]),
+        body: z.string().trim().max(20_000),
+        comments: z.array(z.object({ anchor: lineAnchorSchema, body: reviewBodySchema }).strict()).max(100),
+      })
+      .strict()
+      .refine((review) => review.event === "APPROVE" || review.body !== "" || review.comments.length > 0, "Add a summary or a comment first"),
+    output: z.object({ ok: z.literal(true), url: z.string().nullable() }),
+  },
+  // Queues a note about specific lines on a thread, for the agent to act on.
+  line_to_agent: {
+    input: z.object({ threadId: threadIdSchema, key: prKeySchema, anchor: lineAnchorSchema, body: reviewBodySchema }).strict(),
     output: z.object({ ok: z.literal(true) }),
   },
   thread_resolve: {
@@ -267,6 +301,29 @@ export default async function plugin(bb: BbPluginApi) {
     }
   }
 
+  async function githubRestJson<T>(method: "POST", path: string, body: unknown): Promise<T> {
+    const auth = await resolveToken();
+    if (auth === null) throw new Error("No GitHub token.");
+    const response = await fetch(`${GITHUB_API_URL}${path}`, {
+      method,
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${auth.token}`,
+        "Content-Type": "application/json",
+        "User-Agent": "bb-plugin-github-kit",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const json = (await response.json().catch(() => null)) as (T & { message?: string; errors?: unknown[] }) | null;
+    if (!response.ok) {
+      const errors = Array.isArray(json?.errors) ? ` (${json!.errors.map((error) => (typeof error === "string" ? error : JSON.stringify(error))).join("; ")})` : "";
+      throw new Error(`GitHub ${method} failed with HTTP ${response.status}${json?.message ? `: ${json.message}` : ""}${errors}`);
+    }
+    return json as T;
+  }
+
   async function githubGet<T>(path: string): Promise<T> {
     const auth = await resolveToken();
     if (auth === null) throw new Error("No GitHub token.");
@@ -356,14 +413,14 @@ export default async function plugin(bb: BbPluginApi) {
   }
 
   async function getPullRequest(ref: PrRef): Promise<PrDetail> {
-    const data = await github<{ repository: { pullRequest: RawPrDetail | null } | null }>(PR_DETAIL_QUERY, {
+    const data = await github<{ viewer: { login: string }; repository: { pullRequest: RawPrDetail | null } | null }>(PR_DETAIL_QUERY, {
       owner: ref.owner,
       name: ref.name,
       number: ref.number,
     });
     const raw = data.repository?.pullRequest ?? null;
     if (raw === null) throw new Error(`Pull request ${prKey(ref)} not found`);
-    return normalizeDetail(raw, prKey(ref));
+    return normalizeDetail(raw, prKey(ref), data.viewer.login);
   }
 
   // The tab, the list and several windows can poll the same PR; they share
@@ -474,6 +531,41 @@ export default async function plugin(bb: BbPluginApi) {
       await github(`mutation Viewed($id: ID!, $path: String!) { ${mutation}(input: { pullRequestId: $id, path: $path }) { clientMutationId } }`, { id, path });
       return { ok: true as const };
     },
+    review_comment: async ({ key, anchor, body }) => {
+      const headSha = (await getChecks(key)).headSha;
+      await githubRest("POST", `/repos/${key.owner}/${key.name}/pulls/${key.number}/comments`, {
+        body,
+        commit_id: headSha,
+        ...restAnchor(anchor),
+      });
+      return { ok: true as const };
+    },
+    review_submit: async ({ key, event, body, comments }) => {
+      const detail = await getPullRequest(key);
+      if (event !== "COMMENT" && detail.viewerIsAuthor) throw new Error("GitHub doesn't let you approve or request changes on your own pull request.");
+      const headSha = (await getChecks(key)).headSha;
+      const result = await githubRestJson<{ html_url?: string }>("POST", `/repos/${key.owner}/${key.name}/pulls/${key.number}/reviews`, {
+        commit_id: headSha,
+        event,
+        ...(body !== "" ? { body } : {}),
+        comments: comments.map((comment) => ({ body: comment.body, ...restAnchor(comment.anchor) })),
+      });
+      return { ok: true as const, url: result.html_url ?? null };
+    },
+    line_to_agent: async ({ threadId, key, anchor, body }) => {
+      const detail = await getPullRequest(key);
+      const lines = anchor.startLine === null ? `line ${anchor.line}` : `lines ${anchor.startLine}-${anchor.line}`;
+      const side = anchor.side === "RIGHT" ? "new code" : "old code (removed by the PR)";
+      const text = [
+        `About ${anchor.path}, ${lines} (${side}) in ${detail.key} (${detail.title}), ${detail.url}:`,
+        "",
+        body,
+        "",
+        `Read the current file before changing it. The line numbers match the PR head (${detail.headRefName}), so unpushed local edits may shift them. Don't push, and don't reply or resolve anything on GitHub.`,
+      ].join("\n");
+      await bb.sdk.threads.queuedMessages.create({ threadId, input: [{ type: "text", text, mentions: [] }] });
+      return { ok: true as const };
+    },
     thread_resolve: async ({ key, itemId, resolved }) => {
       // Re-read the PR so only one of its own review threads can be touched.
       const item = (await getPullRequest(key)).feed.find((candidate) => candidate.id === itemId);
@@ -567,6 +659,15 @@ export default async function plugin(bb: BbPluginApi) {
       }
     },
   });
+}
+
+function restAnchor(anchor: { path: string; line: number; startLine: number | null; side: "LEFT" | "RIGHT" }) {
+  return {
+    path: anchor.path,
+    line: anchor.line,
+    side: anchor.side,
+    ...(anchor.startLine !== null ? { start_line: anchor.startLine, start_side: anchor.side } : {}),
+  };
 }
 
 // GitHub's own "Quote reply" shape, trimmed so long comments don't get pasted whole.

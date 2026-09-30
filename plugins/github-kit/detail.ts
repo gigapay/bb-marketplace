@@ -71,12 +71,16 @@ export const prDetailSchema = z.object({
   labels: z.array(z.object({ name: z.string(), color: z.string() })),
   reviewers: z.array(reviewerSchema),
   feed: z.array(feedItemSchema),
+  // GitHub refuses approve / request changes on your own PR.
+  viewerLogin: z.string(),
+  viewerIsAuthor: z.boolean(),
 });
 export type PrDetail = z.infer<typeof prDetailSchema>;
 
 const ACTOR = `author { __typename login avatarUrl }`;
 
 export const PR_DETAIL_QUERY = `query PullRequest($owner: String!, $name: String!, $number: Int!) {
+  viewer { login }
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       id number title url state isDraft body createdAt updatedAt
@@ -155,7 +159,7 @@ export function toActor(raw: RawActor): Actor | null {
 
 const REVIEW_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "PENDING"]);
 
-export function normalizeDetail(raw: RawPrDetail, key: string): PrDetail {
+export function normalizeDetail(raw: RawPrDetail, key: string, viewerLogin: string): PrDetail {
   const reviewers = new Map<string, PrDetail["reviewers"][number]>();
   for (const review of raw.latestOpinionatedReviews.nodes) {
     const actor = toActor(review.author);
@@ -215,6 +219,8 @@ export function normalizeDetail(raw: RawPrDetail, key: string): PrDetail {
   return {
     id: raw.id,
     key,
+    viewerLogin,
+    viewerIsAuthor: raw.author?.login === viewerLogin,
     number: raw.number,
     title: raw.title,
     url: raw.url,

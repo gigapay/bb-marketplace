@@ -22,6 +22,7 @@ import { Composer, Discussion } from "./Discussion";
 import { usePrDetail } from "./useThreadPr";
 import { ChecksSection, usePrChecks } from "./Checks";
 import { PrDiffView } from "./PrDiffView";
+import { ReviewBar } from "./ReviewBar";
 import { ChecksIcon, EmptyState, ErrorLine, LabelChip, PrStateIcon, ReviewChip, errorText, relativeTime, useDebounced } from "./shared";
 
 type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
@@ -99,6 +100,7 @@ export function PullRequestDetail({
               <Comments pr={pr} rpc={rpc} threadId={threadId} onChanged={refresh} />
             </>
           )}
+          <ReviewBar pr={pr} onSubmitted={refresh} />
         </>
       )}
     </div>
