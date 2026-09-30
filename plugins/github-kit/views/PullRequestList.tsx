@@ -21,6 +21,7 @@ import {
 
 const SCOPES: { id: PrScope; label: string }[] = [
   { id: "review", label: "Review requested" },
+  { id: "reviewed", label: "Reviewed" },
   { id: "authored", label: "Created" },
   { id: "assigned", label: "Assigned" },
   { id: "involved", label: "Involved" },

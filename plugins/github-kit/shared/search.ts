@@ -1,11 +1,13 @@
 // Builds the GitHub search string for each pull request scope. Pure so it's
 // covered by `npm test` without a token.
 
-export const PR_SCOPES = ["review", "authored", "assigned", "involved"] as const;
+export const PR_SCOPES = ["review", "reviewed", "authored", "assigned", "involved"] as const;
 export type PrScope = (typeof PR_SCOPES)[number];
 
 const SCOPE_QUALIFIER: Record<PrScope, string> = {
   review: "review-requested:@me",
+  // Your own PRs count your self-reviews, so leave them out.
+  reviewed: "reviewed-by:@me -author:@me",
   authored: "author:@me",
   assigned: "assignee:@me",
   involved: "involves:@me",

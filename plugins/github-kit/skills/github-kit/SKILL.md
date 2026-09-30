@@ -12,7 +12,7 @@ A message that starts with "Inspect and fix the selected review feedback for own
 | Command | Effect |
 | --- | --- |
 | `bb github-kit prs` | Open PRs that request the user's review. |
-| `bb github-kit prs --scope authored` | Open PRs the user created. Other scopes: `assigned`, `involved`. |
+| `bb github-kit prs --scope authored` | Open PRs the user created. Other scopes: `reviewed` (open PRs the user already reviewed), `assigned`, `involved`. |
 | `bb github-kit prs --closed` | Include closed and merged PRs. |
 | `bb github-kit prs repo:owner/name fix` | Extra words are GitHub search terms and qualifiers. |
 

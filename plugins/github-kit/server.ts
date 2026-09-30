@@ -405,7 +405,7 @@ export default async function plugin(bb: BbPluginApi) {
 
   const usage = [
     "Usage:",
-    "  bb github-kit prs [--scope review|authored|assigned|involved] [--closed] [--json] [search...]",
+    "  bb github-kit prs [--scope review|reviewed|authored|assigned|involved] [--closed] [--json] [search...]",
     "",
     "The scope defaults to review. Search accepts GitHub qualifiers, e.g. repo:owner/name.",
   ].join("\n");
@@ -416,7 +416,7 @@ export default async function plugin(bb: BbPluginApi) {
       {
         name: "prs",
         summary: "List pull requests awaiting your review, authored by you, assigned to you, or involving you",
-        usage: "bb github-kit prs [--scope review|authored|assigned|involved] [--closed] [--json] [search...]",
+        usage: "bb github-kit prs [--scope review|reviewed|authored|assigned|involved] [--closed] [--json] [search...]",
       },
     ],
     async run(argv) {

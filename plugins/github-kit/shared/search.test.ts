@@ -19,3 +19,10 @@ test("free text and qualifiers are appended", () => {
     "is:pr archived:false involves:@me is:open repo:gigapay/gigapay-app fix sort:updated-desc",
   );
 });
+
+test("reviewed skips your own PRs", () => {
+  assert.equal(
+    buildPrSearch("reviewed", false, ""),
+    "is:pr archived:false reviewed-by:@me -author:@me is:open sort:updated-desc",
+  );
+});
