@@ -119,6 +119,29 @@
           "tagPrefix": "machine-stats/"
         }
       }
+    },
+    {
+      "id": "traefik-stacks",
+      "displayName": "Traefik Stacks",
+      "description": "Staging slugs and Traefik services on the thread's machine, with one-click destroy, in the sidebar footer.",
+      "icon": "Network",
+      "tags": [
+        "docker",
+        "traefik",
+        "staging"
+      ],
+      "author": {
+        "name": "Yoann Teruel",
+        "github": "yteruel31"
+      },
+      "source": {
+        "git": {
+          "url": "https://github.com/yteruel31/bb-marketplace.git",
+          "subdir": "plugins/traefik-stacks",
+          "range": ">=0.1.0 <1.0.0",
+          "tagPrefix": "traefik-stacks/"
+        }
+      }
     }
   ]
 }
