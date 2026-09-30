@@ -34,7 +34,8 @@
     "contract.ts",
     "worktree",
     "triage",
-    "projects.ts"
+    "projects.ts",
+    "updates"
   ],
   "exclude": [
     "**/*.test.ts",

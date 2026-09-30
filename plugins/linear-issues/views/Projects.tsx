@@ -10,6 +10,7 @@ import type { ProjectDetail, ProjectSummary } from "../projects";
 import type { IssueSummary, rpcContract } from "../server";
 import { IssueGroups } from "./IssueList";
 import { useIssueLinks } from "./links";
+import { UpdateComposer } from "./UpdateComposer";
 import { EmptyState, ErrorLine, errorText, relativeTime } from "./shared";
 
 // Linear's own order for project statuses.
@@ -181,10 +182,10 @@ export function ProjectDetailView({
     setTab("issues");
   };
 
+  const [reloadNonce, setReloadNonce] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
-    setProject(null);
-    setMilestoneId(null);
     setError(null);
     rpc.call("project_get", { id: projectId }).then(
       (result) => !cancelled && setProject(result),
@@ -193,7 +194,12 @@ export function ProjectDetailView({
     return () => {
       cancelled = true;
     };
-  }, [rpc, projectId]);
+  }, [rpc, projectId, reloadNonce]);
+  // A different project starts blank; a reload after posting keeps the page.
+  useEffect(() => {
+    setProject(null);
+    setMilestoneId(null);
+  }, [projectId]);
 
   const loadIssues = useCallback(() => {
     let cancelled = false;
@@ -235,6 +241,10 @@ export function ProjectDetailView({
               <h1 className="text-xl font-semibold leading-tight">{project.name}</h1>
               {project.description ? <p className="mt-1 text-sm text-muted-foreground">{project.description}</p> : null}
             </div>
+            <Button variant="outline" size="sm" onClick={() => setTab("updates")}>
+              <Icon name="Edit" className="size-4" />
+              Write update
+            </Button>
             <Button variant="outline" size="sm" asChild>
               <UrlLink href={project.url} target="_blank">
                 <Icon name="ExternalLink" className="size-4" />
@@ -330,17 +340,24 @@ export function ProjectDetailView({
                 ) : null}
               </div>
             ) : tab === "updates" ? (
-              project.updates.length === 0 ? (
-                <EmptyState>No project updates yet.</EmptyState>
-              ) : (
-                <ol className="space-y-3">
-                  {project.updates.map((update) => (
-                    <li key={update.id}>
-                      <UpdateCard update={update} />
-                    </li>
-                  ))}
-                </ol>
-              )
+              <div className="space-y-4">
+                <UpdateComposer
+                  projectId={project.id}
+                  currentHealth={project.health}
+                  onPosted={() => setReloadNonce((n) => n + 1)}
+                />
+                {project.updates.length === 0 ? (
+                  <EmptyState>No project updates yet.</EmptyState>
+                ) : (
+                  <ol className="space-y-3">
+                    {project.updates.map((update) => (
+                      <li key={update.id}>
+                        <UpdateCard update={update} />
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
             ) : (
               <div>
                 <label className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">

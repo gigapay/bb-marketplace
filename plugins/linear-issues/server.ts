@@ -20,6 +20,14 @@ import {
   projectSummarySchema,
   type IssueFilters,
 } from "./projects.js";
+import {
+  PROJECT_UPDATE_CONTEXT_QUERY,
+  PROJECT_UPDATE_CREATE_MUTATION,
+  buildUpdateContext,
+  buildUpdatePrompt,
+  parseDraft,
+  type RawUpdateContext,
+} from "./updates/draft.js";
 import { registerLinearWorktree } from "./worktree/provider.js";
 import { triageIssue, type TriageContext, type TriageProposal } from "./triage/engine.js";
 import { applyIssueUpdate, loadTriageContext, loadTriageIssues, openRouterJev } from "./triage/linear.js";
@@ -161,6 +169,31 @@ export const rpcContract = defineRpcContract({
   project_get: {
     input: z.object({ id: z.string().min(1).max(100) }).strict(),
     output: projectDetailSchema,
+  },
+  // Spawns a hidden agent thread that drafts the update; returns at once.
+  update_draft_start: {
+    input: z.object({ projectId: z.string().min(1).max(100), notes: z.string().max(2000) }).strict(),
+    output: z.object({ threadId: z.string() }),
+  },
+  update_draft_get: {
+    input: z.object({ threadId: z.string().min(1).max(100) }).strict(),
+    output: z.object({
+      status: z.enum(["running", "ready", "failed"]),
+      draft: z.object({ health: z.enum(["onTrack", "atRisk", "offTrack"]).nullable(), body: z.string() }).nullable(),
+      error: z.string().nullable(),
+    }),
+  },
+  // Posts to Linear; only called when the user presses Post.
+  project_update_create: {
+    input: z
+      .object({
+        projectId: z.string().min(1).max(100),
+        body: z.string().trim().min(1).max(50_000),
+        health: z.enum(["onTrack", "atRisk", "offTrack"]),
+        draftThreadId: z.string().min(1).max(100).nullable(),
+      })
+      .strict(),
+    output: z.object({ url: z.string().nullable() }),
   },
   issue_get: {
     input: z.object({ id: z.string().min(1).max(100) }).strict(),
@@ -725,6 +758,53 @@ export default async function plugin(bb: BbPluginApi) {
         filter: clauses.length ? { and: clauses } : null,
       });
       return { projects: data.projects.nodes.map(flattenProject) };
+    },
+    update_draft_start: async ({ projectId, notes }) => {
+      const data = await linear<{ project: RawUpdateContext | null }>(PROJECT_UPDATE_CONTEXT_QUERY, { id: projectId });
+      if (data.project === null) throw new Error("Project not found");
+      const context = buildUpdateContext(data.project);
+      // Drafting needs no code checkout, so it runs outside any project.
+      const projects = await bb.sdk.projects.list({ includePersonal: true });
+      const personal = projects.find((project) => project.kind === "personal");
+      if (!personal) throw new Error("BB has no personal project to run the drafting agent in");
+      const thread = await bb.sdk.threads.spawn({
+        projectId: personal.id,
+        environment: { type: "project-default" },
+        prompt: buildUpdatePrompt(data.project.name, context, notes),
+        title: `Project update draft: ${data.project.name}`,
+        visibility: "hidden",
+        pluginMetadata: { kind: "project-update-draft", projectId },
+      });
+      return { threadId: thread.id };
+    },
+    update_draft_get: async ({ threadId }) => {
+      const thread = await bb.sdk.threads.get({ threadId });
+      if (thread.status === "error") {
+        return { status: "failed" as const, draft: null, error: "The drafting agent stopped with an error. Open its thread to see why." };
+      }
+      if (thread.status !== "idle") return { status: "running" as const, draft: null, error: null };
+      const { output } = await bb.sdk.threads.output({ threadId });
+      // Idle with no reply yet means the first turn hasn't started.
+      if (output === null) return { status: "running" as const, draft: null, error: null };
+      // The draft is in; release the agent's runtime. The thread stays, so
+      // the user can open it, ask for changes, and pull the new version.
+      await bb.sdk.threads.stop({ threadId }).catch(() => undefined);
+      const draft = parseDraft(output);
+      return draft
+        ? { status: "ready" as const, draft, error: null }
+        : { status: "failed" as const, draft: null, error: "The agent didn't return a draft. Open its thread to see what it said." };
+    },
+    project_update_create: async ({ projectId, body, health, draftThreadId }) => {
+      const data = await linear<{ projectUpdateCreate: { success: boolean; projectUpdate: { url: string } | null } }>(
+        PROJECT_UPDATE_CREATE_MUTATION,
+        { input: { projectId, body, health } },
+      );
+      if (!data.projectUpdateCreate.success) throw new Error("Linear didn't accept the update");
+      if (draftThreadId) {
+        await bb.sdk.threads.archive({ threadId: draftThreadId }).catch(() => undefined);
+        await bb.sdk.threads.stop({ threadId: draftThreadId }).catch(() => undefined);
+      }
+      return { url: data.projectUpdateCreate.projectUpdate?.url ?? null };
     },
     project_get: async ({ id }) => {
       const data = await linear<{ project: Parameters<typeof flattenProjectDetail>[0] | null }>(PROJECT_QUERY, { id });

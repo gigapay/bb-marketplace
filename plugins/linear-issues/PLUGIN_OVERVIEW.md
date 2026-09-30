@@ -2,7 +2,7 @@ Adds a Linear page to the sidebar and ties your BB threads to your Linear ticket
 
 ## What you get
 
-Filter issues by label, priority or project. A Projects tab lists your projects with their health and progress. Open one to read its description and updates and see its issues.
+Filter issues by label, priority or project. A Projects tab lists your projects with their health and progress. Open one to read its description and updates, see its issues, and write a new update. An agent can draft it from what changed since the last one, and you review it before posting.
 
 The Linear page lists the issues assigned to you, created by you, or that you're subscribed to. They're grouped by workflow state, and you can search them or show done issues. A "With threads" tab shows only the issues that already have a BB thread, and every row shows how many threads it has.
 
@@ -28,4 +28,4 @@ Agents get `bb linear-issues current`, `show`, `link` and `unlink`.
 
 ## Requirements
 
-You need a Linear personal API key. Set it in the plugin settings, or run `bb plugin config linear-issues set apiKey <key>`. The key stays on the BB server. The plugin only writes to Linear when you ask it to: a comment or reply you send, or triage changes you apply.
+You need a Linear personal API key. Set it in the plugin settings, or run `bb plugin config linear-issues set apiKey <key>`. The key stays on the BB server. The plugin only writes to Linear when you ask it to: a comment or reply you send, a project update you post, or triage changes you apply.

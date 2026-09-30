@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-linear-issues",
-  "version": "0.13.2",
+  "version": "0.14.0",
   "type": "module",
   "engines": {
     "bb": ">=0.44",
@@ -56,7 +56,7 @@
     "vaul": "^1.1.2"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --import ./test/ts-resolve.mjs --test shared/*.test.ts worktree/*.test.ts triage/*.test.ts",
+    "test": "node --experimental-strip-types --import ./test/ts-resolve.mjs --test shared/*.test.ts worktree/*.test.ts triage/*.test.ts updates/*.test.ts",
     "typecheck": "tsc -p ."
   }
 }
