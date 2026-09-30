@@ -85,14 +85,16 @@ function LinearPage({ subPath }: PluginNavPanelProps) {
           <ErrorLine error={status.error ?? "Could not reach Linear."} />
         ) : parts[0] === "projects" && parts[1] ? (
           <ProjectDetailView
+            key={`${parts[1]}/${parts[2] ?? ""}`}
             projectId={parts[1]}
+            initialTab={parts[2] === "updates" || parts[2] === "issues" ? parts[2] : undefined}
             onBack={() => go("projects")}
             onOpenIssue={openIssueFrom(`projects/${parts[1]}`)}
           />
         ) : parts[0] === "projects" ? (
           <>
             <PageTabs active="projects" onSelect={go} />
-            <ProjectList onOpen={(id) => go(`projects/${encodeURIComponent(id)}`)} />
+            <ProjectList onOpen={(id, tab) => go(`projects/${encodeURIComponent(id)}${tab ? `/${tab}` : ""}`)} />
           </>
         ) : IDENTIFIER_PATTERN.test(identifier.toUpperCase()) ? (
           <IssueDetail identifier={identifier.toUpperCase()} onBack={() => go(returnTo)} />

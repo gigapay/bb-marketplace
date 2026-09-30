@@ -12,6 +12,7 @@ import { IssueGroups } from "./IssueList";
 import { useIssueLinks } from "./links";
 import { UpdateComposer } from "./UpdateComposer";
 import { TriageDialog } from "./Triage";
+import { ProjectTriageDialog } from "./ProjectTriage";
 import { EmptyState, ErrorLine, errorText, relativeTime } from "./shared";
 
 // Linear's own order for project statuses.
@@ -68,12 +69,14 @@ function formatDate(value: string | null): string | null {
   return new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
-export function ProjectList({ onOpen }: { onOpen: (projectId: string) => void }) {
+export function ProjectList({ onOpen }: { onOpen: (projectId: string, tab?: "updates") => void }) {
   const rpc = useRpc<typeof rpcContract>();
   const [mine, setMine] = useState(true);
   const [includeClosed, setIncludeClosed] = useState(false);
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [triageOpen, setTriageOpen] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,7 +88,7 @@ export function ProjectList({ onOpen }: { onOpen: (projectId: string) => void })
     return () => {
       cancelled = true;
     };
-  }, [rpc, mine, includeClosed]);
+  }, [rpc, mine, includeClosed, reloadNonce]);
 
   const groups = useMemo(() => {
     const byType = new Map<string, { status: NonNullable<ProjectSummary["status"]>; projects: ProjectSummary[] }>();
@@ -110,7 +113,24 @@ export function ProjectList({ onOpen }: { onOpen: (projectId: string) => void })
           <Checkbox checked={includeClosed} onCheckedChange={(checked) => setIncludeClosed(checked === true)} />
           Show completed
         </label>
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto"
+          onClick={() => setTriageOpen(true)}
+          disabled={!projects || projects.length === 0}
+        >
+          <Icon name="linear-issues/linear" className="size-3.5 text-[#5E6AD2]" />
+          Triage with Jev
+        </Button>
       </div>
+      <ProjectTriageDialog
+        open={triageOpen}
+        onOpenChange={setTriageOpen}
+        projects={projects ?? []}
+        onOpenProject={onOpen}
+        onApplied={() => setReloadNonce((n) => n + 1)}
+      />
       <ErrorLine error={error} />
       <div className="mt-4 space-y-4">
         {projects === null ? (
@@ -161,10 +181,12 @@ export function ProjectList({ onOpen }: { onOpen: (projectId: string) => void })
 
 export function ProjectDetailView({
   projectId,
+  initialTab,
   onBack,
   onOpenIssue,
 }: {
   projectId: string;
+  initialTab?: "overview" | "updates" | "issues";
   onBack: () => void;
   onOpenIssue: (identifier: string) => void;
 }) {
@@ -173,7 +195,7 @@ export function ProjectDetailView({
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [issues, setIssues] = useState<IssueSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"overview" | "updates" | "issues">("overview");
+  const [tab, setTab] = useState<"overview" | "updates" | "issues">(initialTab ?? "overview");
   const [includeCompleted, setIncludeCompleted] = useState(false);
   // null = every issue; "none" = issues outside any milestone.
   const [milestoneId, setMilestoneId] = useState<string | null>(null);

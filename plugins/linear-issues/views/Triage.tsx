@@ -84,7 +84,7 @@ const VERBS: Record<TriageChangeDto["kind"], string> = {
   cancel: "Cancel",
 };
 
-function ConfidencePill({ value }: { value: number }) {
+export function ConfidencePill({ value }: { value: number }) {
   const percent = Math.round(value * 100);
   return (
     <span

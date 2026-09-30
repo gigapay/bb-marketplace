@@ -31,6 +31,14 @@ import {
 import { registerLinearWorktree } from "./worktree/provider.js";
 import { triageIssue, type TriageContext, type TriageProposal } from "./triage/engine.js";
 import { applyIssueUpdate, loadTriageContext, loadTriageIssues, openRouterJev } from "./triage/linear.js";
+import {
+  PROJECT_STATUSES_QUERY,
+  PROJECT_STATUS_MUTATION,
+  PROJECT_TRIAGE_QUERY,
+  isTriageable,
+  toTriageInput,
+  triageProject,
+} from "./triage/projects.js";
 import { IDENTIFIER_PATTERN, LINKS_CHANGED, linkedIssueFromPrompt, resolveLink, resolveThreadLinks } from "./shared/links";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
@@ -138,6 +146,34 @@ const triageProposalSchema = z.object({
 export type TriageProposalDto = z.infer<typeof triageProposalSchema>;
 export type TriageChangeDto = z.infer<typeof triageChangeSchema>;
 
+const projectFlagSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("update-due"), daysSinceUpdate: z.number().nullable(), everyWeeks: z.number() }),
+  z.object({ kind: z.literal("overdue"), daysOverdue: z.number() }),
+  z.object({ kind: z.literal("behind"), progress: z.number(), elapsed: z.number() }),
+  z.object({ kind: z.literal("no-lead") }),
+  z.object({ kind: z.literal("no-target") }),
+  z.object({ kind: z.literal("health"), stated: z.string().nullable(), suggested: z.string(), confidence: z.number() }),
+  z.object({ kind: z.literal("thin-description"), confidence: z.number() }),
+]);
+const projectTriageProposalSchema = z.object({
+  projectId: z.string(),
+  name: z.string(),
+  flags: z.array(projectFlagSchema),
+  changes: z.array(
+    z.object({
+      kind: z.literal("status"),
+      statusType: z.enum(["completed", "paused", "canceled"]),
+      statusId: z.string(),
+      statusName: z.string(),
+      reason: z.string(),
+      confidence: z.number(),
+      preselected: z.literal(false),
+    }),
+  ),
+  error: z.string().nullable(),
+});
+export type ProjectTriageProposalDto = z.infer<typeof projectTriageProposalSchema>;
+
 export const rpcContract = defineRpcContract({
   status: {
     input: z.null(),
@@ -209,6 +245,17 @@ export const rpcContract = defineRpcContract({
       })
       .strict(),
     output: z.object({ id: z.string() }),
+  },
+  // Read-only: measures each project, asks Jev, and proposes; writes nothing.
+  project_triage_run: {
+    input: z.object({ projectIds: z.array(z.string().min(1).max(100)).min(1).max(40) }).strict(),
+    output: z.object({ proposals: z.array(projectTriageProposalSchema) }),
+  },
+  project_triage_apply: {
+    input: z
+      .object({ updates: z.array(z.object({ projectId: z.string().min(1).max(100), statusId: z.string().min(1).max(100) }).strict()).min(1).max(40) })
+      .strict(),
+    output: z.object({ results: z.array(z.object({ projectId: z.string(), error: z.string().nullable() })) }),
   },
   triage_status: {
     input: z.null(),
@@ -863,6 +910,50 @@ export default async function plugin(bb: BbPluginApi) {
         throw new Error("Linear didn't accept the comment");
       }
       return { id: data.commentCreate.comment.id };
+    },
+    project_triage_run: async ({ projectIds }) => {
+      const { openRouterApiKey, staleAfterDays } = await settings.get();
+      if (typeof openRouterApiKey !== "string" || openRouterApiKey.trim() === "") {
+        throw new Error("Set the OpenRouter API key in the plugin settings to triage with Jev.");
+      }
+      const jev = openRouterJev(openRouterApiKey.trim());
+      const { projectStatuses } = await linear<{ projectStatuses: { nodes: { id: string; name: string; type: string; position: number }[] } }>(
+        PROJECT_STATUSES_QUERY,
+      );
+      const proposals = [];
+      // One project per Linear query keeps each under Linear's complexity limit.
+      for (let start = 0; start < projectIds.length; start += 4) {
+        const batch = projectIds.slice(start, start + 4);
+        proposals.push(
+          ...(await Promise.all(
+            batch.map(async (projectId) => {
+              try {
+                const data = await linear<{ project: Parameters<typeof toTriageInput>[0] | null }>(PROJECT_TRIAGE_QUERY, { id: projectId });
+                if (data.project === null) throw new Error("Project not found");
+                const input = toTriageInput(data.project);
+                if (!isTriageable(input.statusType)) return null;
+                return { ...(await triageProject(jev, input, { statuses: projectStatuses.nodes, staleAfterDays })), error: null };
+              } catch (cause) {
+                return { projectId, name: projectId, flags: [], changes: [], error: errorMessage(cause) };
+              }
+            }),
+          )),
+        );
+      }
+      return { proposals: proposals.filter((proposal) => proposal !== null) };
+    },
+    project_triage_apply: async ({ updates }) => {
+      const results = [];
+      for (const { projectId, statusId } of updates) {
+        try {
+          const data = await linear<{ projectUpdate: { success: boolean } }>(PROJECT_STATUS_MUTATION, { id: projectId, input: { statusId } });
+          if (!data.projectUpdate.success) throw new Error("Linear didn't accept the status change");
+          results.push({ projectId, error: null });
+        } catch (cause) {
+          results.push({ projectId, error: errorMessage(cause) });
+        }
+      }
+      return { results };
     },
     triage_status: async () => {
       const { openRouterApiKey } = await settings.get();

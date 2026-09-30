@@ -58,6 +58,24 @@ Jev doesn't write text. It answers typed questions with probabilities, so triage
 
 Only labels that exist in the workspace are asked about. `triage/engine.ts` turns the answers into proposals. A proposal below the `propose` threshold is dropped, and one above `preselect` is pre-checked. The review dialog (`views/Triage.tsx`) lists them per issue with their confidence. Rows are colour-coded by kind: amber for priority, the label's own Linear colour, violet for project, blue for comment, red for cancel. Confidence is green, amber or grey. Only the checked changes are applied, through `issueUpdate`, then `commentCreate` for comments. Labels are added with `addedLabelIds` and never removed. The optional `triageGuidelines` setting passes team conventions to every request.
 
+## Project triage
+
+"Triage with Jev" in the Projects tab reviews the active projects listed there (`triage/projects.ts`, constants at the top). Code measures what it can:
+
+- Update due, against the project's own `updateReminderFrequencyInWeeks` (2 weeks when unset).
+- Overdue target date.
+- Behind schedule, when done% trails elapsed-time% by more than 25 points.
+- No lead, or no target date.
+- Every issue done, which proposes Completed.
+
+Jev answers what needs judgment:
+
+- Does the stated health match the facts and the latest update? A disagreement at 70% or more is flagged.
+- Does the description explain the goal, scope and success?
+- For projects with no issue activity in `staleAfterDays`: is it optional, and does it carry a commitment? The review proposes Paused when it's committed, and Canceled when it's optional and uncommitted.
+
+Flags link to the project, or straight to its Updates tab to draft an update. The only writes are status changes (`projectUpdate` with `statusId`), and they're never pre-checked.
+
 ## Project updates
 
 The project page's Updates tab has a composer (`views/UpdateComposer.tsx`) for a new update: health (on track, at risk, off track), Markdown with a preview, and a draft kept in `localStorage` until you post. "Draft with an agent" calls `update_draft_start`. The server collects the project's facts from Linear in code (`updates/draft.ts`): what was completed, started, added or canceled since the last update, what's in progress or blocked, and which milestones are overdue. It then spawns a hidden BB thread in the personal project with a prompt asking for a `<project-update>` block. The UI polls `update_draft_get`. When the agent is idle, its last message is parsed into the composer and its runtime is stopped. You can open the thread to ask for changes and then "Pull latest draft". Nothing is posted until you press "Post update" (`projectUpdateCreate`), which also archives the drafting thread.
