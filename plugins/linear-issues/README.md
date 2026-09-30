@@ -42,6 +42,19 @@ BB's sidebar belongs to its bundled thread-list plugin, which has no extension p
 
 Linear serves pasted images and attachments from `uploads.linear.app` only when the request carries the API key. The server exposes `GET /api/v1/plugins/linear-issues/http/upload?url=…` (auth `local`), which fetches the file with the key and streams it back. It only proxies `https://uploads.linear.app`, so the key can't be sent anywhere else. `lib/uploads.ts` rewrites those URLs in descriptions and comments before they reach `Markdown`. Non-image files are served as downloads, and responses carry `nosniff` plus a sandboxing CSP.
 
+## Writing to Linear
+
+`writes.ts` holds every mutation, shared by the UI and the agent CLI:
+
+| What | UI | CLI |
+| --- | --- | --- |
+| Issues | "New issue" (list and project), inline edits of title, description, status, priority, assignee, labels, project and milestone, archive | `create`, `update`, `archive` |
+| Comments | comment, reply, edit and delete your own | `comment` (with `--reply-to`), `comment-edit`, `comment-delete` |
+| Projects | "New project", Edit, delete (Linear's trash) | `project-create`, `project-edit`, `project-delete` |
+| Project updates | post (optionally agent-drafted), edit and archive your own | `update-post`, `update-edit`, `update-archive` |
+
+The CLI takes names wherever the API takes ids: team keys, state names or `todo`/`done`, `me`, people, labels, projects and milestones. `resolver()` in `writes.ts` turns them into ids and lists the valid choices when a name doesn't match. Writes happen right away, with no confirmation step, and every command prints the Linear URL. Nothing is permanently deleted: issues and updates are archived, and projects go to Linear's trash.
+
 ## Triage with Jev
 
 "Triage with Jev" in the Linear page (and in a project's Issues tab, scoped to the milestone shown) asks TypeSafe's Jev model about every issue in the current list (up to 50). It uses the official `@typesafe-ai/sdk`, pointed at OpenRouter (`openRouterApiKey` setting) with a small fetch shim, because OpenRouter serves the same System One protocol at `/api/alpha/decisions`.

@@ -35,7 +35,9 @@
     "worktree",
     "triage",
     "projects.ts",
-    "updates"
+    "updates",
+    "writes.ts",
+    "cli.ts"
   ],
   "exclude": [
     "**/*.test.ts",

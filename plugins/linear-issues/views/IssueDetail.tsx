@@ -17,6 +17,16 @@ import { buildIssuePrompt } from "@/lib/prompt";
 import type { IssueDetail as Issue, rpcContract } from "../server";
 import { SOURCE_LABELS, useIssueLinks, type LinkedThread } from "./links";
 import { CommentThreads } from "./Comments";
+import {
+  ChoiceMenu,
+  labelChoices,
+  memberChoices,
+  priorityChoices,
+  projectChoices,
+  stateChoices,
+  useMilestones,
+  useWriteOptions,
+} from "./editing";
 import { ThreadPickerDialog } from "./pickers";
 import { EmptyState, ErrorLine, LabelChip, PriorityIcon, StateIcon, errorText, relativeTime } from "./shared";
 
@@ -61,6 +71,14 @@ export function IssueDetail({ identifier, onBack }: { identifier: string; onBack
 }
 
 function IssueBody({ issue, onChanged }: { issue: Issue; onChanged: () => void }) {
+  const options = useWriteOptions();
+  const team = options?.teams.find((candidate) => candidate.id === issue.team.id);
+  const milestones = useMilestones(issue.project?.id ?? null);
+  const [saving, setSaving] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(issue.title);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState(issue.description ?? "");
   const sdk = useSdk();
   const rpc = useRpc<typeof rpcContract>();
   const navigate = useBbNavigate();
@@ -107,6 +125,31 @@ function IssueBody({ issue, onChanged }: { issue: Issue; onChanged: () => void }
     setFocusRequest((n) => n + 1);
   };
 
+  // Every edit goes straight to Linear, then the page reloads the issue.
+  const save = async (changes: Record<string, unknown>) => {
+    setSaving(true);
+    try {
+      await rpc.call("issue_update", { id: issue.id, ...changes } as never);
+      onChanged();
+      return true;
+    } catch (cause) {
+      toast.error(errorText(cause));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+  const archive = async () => {
+    if (!window.confirm(`Archive ${issue.identifier}? You can restore it from Linear.`)) return;
+    try {
+      await rpc.call("issue_archive", { id: issue.id });
+      toast.success(`Archived ${issue.identifier}`);
+      navigate.toPluginPanel("issues");
+    } catch (cause) {
+      toast.error(errorText(cause));
+    }
+  };
+
   const copyBranch = () => {
     void navigator.clipboard.writeText(issue.branchName).then(
       () => toast.success("Branch name copied"),
@@ -119,7 +162,33 @@ function IssueBody({ issue, onChanged }: { issue: Issue; onChanged: () => void }
       <header className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="font-mono text-xs text-muted-foreground">{issue.identifier}</p>
-          <h1 className="mt-1 text-xl font-semibold leading-tight">{issue.title}</h1>
+          {editingTitle ? (
+            <input
+              autoFocus
+              value={titleDraft}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              onBlur={() => setEditingTitle(false)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setEditingTitle(false);
+                if (event.key === "Enter" && titleDraft.trim() && titleDraft.trim() !== issue.title) {
+                  void save({ title: titleDraft.trim() }).then((ok) => ok && setEditingTitle(false));
+                }
+              }}
+              aria-label="Title"
+              className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1 text-xl font-semibold leading-tight focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          ) : (
+            <h1
+              className="mt-1 cursor-text rounded-md text-xl font-semibold leading-tight hover:bg-accent/40"
+              onClick={() => {
+                setTitleDraft(issue.title);
+                setEditingTitle(true);
+              }}
+              title="Click to edit"
+            >
+              {issue.title}
+            </h1>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" size="sm" asChild>
@@ -132,33 +201,86 @@ function IssueBody({ issue, onChanged }: { issue: Issue; onChanged: () => void }
             <Icon name="Play" className="size-4" />
             Start thread
           </Button>
+          <Button variant="ghost" size="icon" aria-label={`Archive ${issue.identifier}`} onClick={() => void archive()}>
+            <Icon name="Archive" className="size-4" />
+          </Button>
         </div>
       </header>
 
       <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 rounded-lg border border-border bg-card p-4 text-sm sm:grid-cols-[auto_1fr_auto_1fr]">
         <Meta label="State">
-          <span className="inline-flex items-center gap-2">
-            <StateIcon state={issue.state} />
-            {issue.state.name}
-          </span>
+          <ChoiceMenu
+            label="Status"
+            disabled={!team || saving}
+            choices={stateChoices(team)}
+            selected={[issue.state.id]}
+            onSelect={([key]) => key !== issue.state.id && void save({ stateId: key })}
+            trigger={
+              <span className="inline-flex items-center gap-2">
+                <StateIcon state={issue.state} />
+                {issue.state.name}
+              </span>
+            }
+          />
         </Meta>
         <Meta label="Priority">
-          <span className="inline-flex items-center gap-2">
-            <PriorityIcon priority={issue.priority} label={issue.priorityLabel} />
-            {issue.priorityLabel}
+          <ChoiceMenu
+            label="Priority"
+            disabled={saving}
+            choices={priorityChoices}
+            selected={[String(issue.priority)]}
+            onSelect={([key]) => Number(key) !== issue.priority && void save({ priority: Number(key) })}
+            trigger={
+              <span className="inline-flex items-center gap-2">
+                <PriorityIcon priority={issue.priority} label={issue.priorityLabel} />
+                {issue.priorityLabel}
+              </span>
+            }
+          />
+        </Meta>
+        <Meta label="Assignee">
+          <ChoiceMenu
+            label="Assignee"
+            disabled={!team || saving}
+            choices={memberChoices(team)}
+            selected={[issue.assignee?.id ?? "none"]}
+            onSelect={([key]) => void save({ assigneeId: key === "none" ? null : key })}
+            trigger={<span className="truncate">{issue.assignee?.name ?? "Unassigned"}</span>}
+          />
+        </Meta>
+        <Meta label="Team">{issue.team.name}</Meta>
+        <Meta label="Project">
+          <span className="inline-flex min-w-0 items-center gap-1">
+            <ChoiceMenu
+              label="Project"
+              disabled={!options || saving}
+              choices={options ? projectChoices(options, issue.team.id) : []}
+              selected={[issue.project?.id ?? "none"]}
+              onSelect={([key]) => void save({ projectId: key === "none" ? null : key })}
+              trigger={<span className="truncate">{issue.project?.name ?? "No project"}</span>}
+            />
+            {issue.project ? (
+              <button
+                type="button"
+                aria-label={`Open project ${issue.project.name}`}
+                onClick={() => navigate.toPluginPanel("issues", { subPath: `projects/${issue.project!.id}` })}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                <Icon name="ArrowUpRight" className="size-3.5" />
+              </button>
+            ) : null}
           </span>
         </Meta>
-        <Meta label="Assignee">{issue.assignee?.name ?? "Unassigned"}</Meta>
-        <Meta label="Team">{issue.team.name}</Meta>
-        {issue.project ? (
-          <Meta label="Project">
-            <button
-              type="button"
-              onClick={() => navigate.toPluginPanel("issues", { subPath: `projects/${issue.project!.id}` })}
-              className="truncate underline-offset-2 hover:underline"
-            >
-              {issue.project.name}
-            </button>
+        {issue.project && milestones.length ? (
+          <Meta label="Milestone">
+            <ChoiceMenu
+              label="Milestone"
+              disabled={saving}
+              choices={[{ key: "none", label: "No milestone" }, ...milestones.map((m) => ({ key: m.id, label: m.name }))]}
+              selected={[issue.milestone?.id ?? "none"]}
+              onSelect={([key]) => void save({ projectMilestoneId: key === "none" ? null : key })}
+              trigger={<span className="truncate">{issue.milestone?.name ?? "No milestone"}</span>}
+            />
           </Meta>
         ) : null}
         {issue.cycle ? <Meta label="Cycle">{issue.cycle.name ?? `Cycle ${issue.cycle.number}`}</Meta> : null}
@@ -176,15 +298,27 @@ function IssueBody({ issue, onChanged }: { issue: Issue; onChanged: () => void }
           </button>
         </Meta>
         <Meta label="Updated">{relativeTime(issue.updatedAt)}</Meta>
-        {issue.labels.length ? (
-          <Meta label="Labels">
-            <span className="flex flex-wrap gap-1">
-              {issue.labels.map((label) => (
-                <LabelChip key={label.id} name={label.name} color={label.color} />
-              ))}
-            </span>
-          </Meta>
-        ) : null}
+        <Meta label="Labels">
+          <ChoiceMenu
+            label="Labels"
+            multiple
+            disabled={!options || saving}
+            choices={options ? labelChoices(options, issue.team.id) : []}
+            selected={issue.labels.map((label) => label.id)}
+            onSelect={(keys) => void save({ labelIds: keys })}
+            trigger={
+              issue.labels.length ? (
+                <span className="flex flex-wrap gap-1">
+                  {issue.labels.map((label) => (
+                    <LabelChip key={label.id} name={label.name} color={label.color} />
+                  ))}
+                </span>
+              ) : (
+                <span className="text-muted-foreground">Add labels</span>
+              )
+            }
+          />
+        </Meta>
       </dl>
 
       <section className="mt-6">
@@ -245,7 +379,47 @@ function IssueBody({ issue, onChanged }: { issue: Issue; onChanged: () => void }
       ) : null}
 
       <section className="mt-6">
-        {issue.description?.trim() ? (
+        <div className="mb-1 flex justify-end">
+          {editingDescription ? null : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-muted-foreground"
+              onClick={() => {
+                setDescriptionDraft(issue.description ?? "");
+                setEditingDescription(true);
+              }}
+            >
+              <Icon name="Edit" className="size-3.5" />
+              Edit description
+            </Button>
+          )}
+        </div>
+        {editingDescription ? (
+          <div className="space-y-2">
+            <textarea
+              autoFocus
+              value={descriptionDraft}
+              onChange={(event) => setDescriptionDraft(event.target.value)}
+              aria-label="Description"
+              rows={12}
+              className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setEditingDescription(false)} disabled={saving}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={saving}
+                onClick={() => void save({ description: descriptionDraft }).then((ok) => ok && setEditingDescription(false))}
+              >
+                <Icon name={saving ? "Loading" : "Check"} className={saving ? "size-4 animate-spin" : "size-4"} />
+                Save
+              </Button>
+            </div>
+          </div>
+        ) : issue.description?.trim() ? (
           <Markdown content={proxyLinearUploads(issue.description)} />
         ) : (
           <p className="text-sm italic text-muted-foreground">No description.</p>

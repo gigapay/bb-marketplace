@@ -4,7 +4,7 @@ import { z } from "zod";
 
 export const projectHealthSchema = z.enum(["onTrack", "atRisk", "offTrack"]).nullable();
 
-const projectStatusSchema = z.object({ name: z.string(), type: z.string(), color: z.string() }).nullable();
+const projectStatusSchema = z.object({ id: z.string(), name: z.string(), type: z.string(), color: z.string() }).nullable();
 
 export const projectSummarySchema = z.object({
   id: z.string(),
@@ -19,7 +19,7 @@ export const projectSummarySchema = z.object({
   startDate: z.string().nullable(),
   targetDate: z.string().nullable(),
   updatedAt: z.string(),
-  lead: z.object({ name: z.string() }).nullable(),
+  lead: z.object({ id: z.string(), name: z.string() }).nullable(),
   teams: z.array(z.string()),
 });
 export type ProjectSummary = z.infer<typeof projectSummarySchema>;
@@ -32,6 +32,7 @@ export const projectUpdateSchema = z.object({
   editedAt: z.string().nullable(),
   url: z.string(),
   author: z.string(),
+  authorId: z.string().nullable(),
 });
 
 export const projectDetailSchema = projectSummarySchema.extend({
@@ -52,8 +53,8 @@ export type FilterOptions = z.infer<typeof filterOptionsSchema>;
 
 const PROJECT_SUMMARY_FIELDS = `
   id name description icon color url health progress startDate targetDate updatedAt
-  status { name type color }
-  lead { name }
+  status { id name type color }
+  lead { id name }
   teams(first: 10) { nodes { key } }
 `;
 
@@ -67,7 +68,7 @@ export const PROJECT_QUERY = `query Project($id: String!) {
     content
     members(first: 50) { nodes { name } }
     projectMilestones(first: 50) { nodes { id name targetDate progress sortOrder } }
-    projectUpdates(first: 30) { nodes { id body health createdAt editedAt url user { name } } }
+    projectUpdates(first: 30) { nodes { id body health createdAt editedAt url user { id name } } }
   }
 }`;
 
@@ -82,7 +83,7 @@ type RawProjectDetail = RawProject & {
   members: { nodes: { name: string }[] };
   projectMilestones: { nodes: { id: string; name: string; targetDate: string | null; progress: number; sortOrder: number }[] };
   projectUpdates: {
-    nodes: { id: string; body: string; health: ProjectDetail["health"]; createdAt: string; editedAt: string | null; url: string; user: { name: string } | null }[];
+    nodes: { id: string; body: string; health: ProjectDetail["health"]; createdAt: string; editedAt: string | null; url: string; user: { id: string; name: string } | null }[];
   };
 };
 
@@ -114,6 +115,7 @@ export function flattenProjectDetail(raw: RawProjectDetail): ProjectDetail {
         editedAt: update.editedAt,
         url: update.url,
         author: update.user?.name ?? "Unknown",
+        authorId: update.user?.id ?? null,
       }))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
   };

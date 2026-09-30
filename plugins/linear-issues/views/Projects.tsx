@@ -11,8 +11,11 @@ import type { IssueSummary, rpcContract } from "../server";
 import { IssueGroups } from "./IssueList";
 import { useIssueLinks } from "./links";
 import { UpdateComposer } from "./UpdateComposer";
+import { useWriteOptions } from "./editing";
 import { TriageDialog } from "./Triage";
 import { ProjectTriageDialog } from "./ProjectTriage";
+import { IssueFormDialog, ProjectFormDialog, type ProjectFormValues } from "./editing";
+import { toast } from "sonner";
 import { EmptyState, ErrorLine, errorText, relativeTime } from "./shared";
 
 // Linear's own order for project statuses.
@@ -77,6 +80,7 @@ export function ProjectList({ onOpen }: { onOpen: (projectId: string, tab?: "upd
   const [error, setError] = useState<string | null>(null);
   const [triageOpen, setTriageOpen] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,7 +97,7 @@ export function ProjectList({ onOpen }: { onOpen: (projectId: string, tab?: "upd
   const groups = useMemo(() => {
     const byType = new Map<string, { status: NonNullable<ProjectSummary["status"]>; projects: ProjectSummary[] }>();
     for (const project of projects ?? []) {
-      const status = project.status ?? { name: "No status", type: "backlog", color: "#888" };
+      const status = project.status ?? { id: "none", name: "No status", type: "backlog", color: "#888" };
       const group = byType.get(status.type) ?? { status, projects: [] };
       group.projects.push(project);
       byType.set(status.type, group);
@@ -113,10 +117,13 @@ export function ProjectList({ onOpen }: { onOpen: (projectId: string, tab?: "upd
           <Checkbox checked={includeClosed} onCheckedChange={(checked) => setIncludeClosed(checked === true)} />
           Show completed
         </label>
+        <Button size="sm" className="ml-auto" onClick={() => setCreating(true)}>
+          <Icon name="Plus" className="size-4" />
+          New project
+        </Button>
         <Button
           variant="outline"
           size="sm"
-          className="ml-auto"
           onClick={() => setTriageOpen(true)}
           disabled={!projects || projects.length === 0}
         >
@@ -124,6 +131,7 @@ export function ProjectList({ onOpen }: { onOpen: (projectId: string, tab?: "upd
           Triage with Jev
         </Button>
       </div>
+      <ProjectFormDialog open={creating} onOpenChange={setCreating} initial={null} onSaved={(id) => onOpen(id)} />
       <ProjectTriageDialog
         open={triageOpen}
         onOpenChange={setTriageOpen}
@@ -200,6 +208,8 @@ export function ProjectDetailView({
   // null = every issue; "none" = issues outside any milestone.
   const [milestoneId, setMilestoneId] = useState<string | null>(null);
   const [triageOpen, setTriageOpen] = useState(false);
+  const [creatingIssue, setCreatingIssue] = useState(false);
+  const [editingProject, setEditingProject] = useState(false);
 
   const openMilestone = (id: string) => {
     setMilestoneId(id);
@@ -278,6 +288,27 @@ export function ProjectDetailView({
               <Icon name="Edit" className="size-4" />
               Write update
             </Button>
+            <Button variant="outline" size="sm" onClick={() => setEditingProject(true)}>
+              <Icon name="Settings" className="size-4" />
+              Edit
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Delete ${project.name}`}
+              onClick={() => {
+                if (!window.confirm(`Move "${project.name}" to Linear's trash? It can be restored from Linear.`)) return;
+                rpc.call("project_delete", { id: project.id }).then(
+                  () => {
+                    toast.success("Project moved to the trash");
+                    onBack();
+                  },
+                  (cause) => toast.error(errorText(cause)),
+                );
+              }}
+            >
+              <Icon name="Trash2" className="size-4" />
+            </Button>
             <Button variant="outline" size="sm" asChild>
               <UrlLink href={project.url} target="_blank">
                 <Icon name="ExternalLink" className="size-4" />
@@ -286,6 +317,12 @@ export function ProjectDetailView({
             </Button>
           </header>
 
+          <ProjectFormDialog
+            open={editingProject}
+            onOpenChange={setEditingProject}
+            initial={toFormValues(project)}
+            onSaved={() => setReloadNonce((n) => n + 1)}
+          />
           <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-border bg-card p-3 text-sm">
             <StatusBadge status={project.status} />
             <HealthBadge health={project.health} />
@@ -368,7 +405,7 @@ export function ProjectDetailView({
                 </Section>
                 {project.updates[0] ? (
                   <Section title="Latest update">
-                    <UpdateCard update={project.updates[0]} />
+                    <UpdateCard update={project.updates[0]} onChanged={() => setReloadNonce((n) => n + 1)} />
                   </Section>
                 ) : null}
               </div>
@@ -385,7 +422,7 @@ export function ProjectDetailView({
                   <ol className="space-y-3">
                     {project.updates.map((update) => (
                       <li key={update.id}>
-                        <UpdateCard update={update} />
+                        <UpdateCard update={update} onChanged={() => setReloadNonce((n) => n + 1)} />
                       </li>
                     ))}
                   </ol>
@@ -398,10 +435,13 @@ export function ProjectDetailView({
                     <Checkbox checked={includeCompleted} onCheckedChange={(checked) => setIncludeCompleted(checked === true)} />
                     Show done
                   </label>
+                  <Button size="sm" className="ml-auto" onClick={() => setCreatingIssue(true)}>
+                    <Icon name="Plus" className="size-4" />
+                    New issue
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="ml-auto"
                     onClick={() => setTriageOpen(true)}
                     disabled={visibleIssues.length === 0}
                   >
@@ -409,6 +449,12 @@ export function ProjectDetailView({
                     Triage with Jev
                   </Button>
                 </div>
+                <IssueFormDialog
+                  open={creatingIssue}
+                  onOpenChange={setCreatingIssue}
+                  defaults={{ projectId: project.id }}
+                  onCreated={() => loadIssues()}
+                />
                 <TriageDialog
                   open={triageOpen}
                   onOpenChange={setTriageOpen}
@@ -500,7 +546,59 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function UpdateCard({ update }: { update: ProjectDetail["updates"][number] }) {
+function toFormValues(project: ProjectDetail): ProjectFormValues {
+  return {
+    id: project.id,
+    name: project.name,
+    description: project.description,
+    content: project.content ?? "",
+    statusId: project.status?.id ?? null,
+    leadId: project.lead?.id ?? null,
+    startDate: project.startDate,
+    targetDate: project.targetDate,
+    teamIds: [],
+  };
+}
+
+function UpdateCard({ update, onChanged }: { update: ProjectDetail["updates"][number]; onChanged: () => void }) {
+  const rpc = useRpc<typeof rpcContract>();
+  const options = useWriteOptions();
+  const mine = options !== null && update.authorId === options.viewer.id;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(update.body);
+  const [busy, setBusy] = useState(false);
+  const act = async (run: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await run();
+      setEditing(false);
+      onChanged();
+    } catch (cause) {
+      toast.error(errorText(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (editing) {
+    return (
+      <article className="space-y-2 rounded-lg border border-border bg-card p-3">
+        <textarea
+          autoFocus
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          aria-label="Edit update"
+          rows={8}
+          className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        />
+        <div className="flex justify-end gap-2">
+          <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={busy}>Cancel</Button>
+          <Button size="sm" onClick={() => void act(() => rpc.call("update_edit", { id: update.id, body: draft }))} disabled={busy || !draft.trim()}>
+            Save
+          </Button>
+        </div>
+      </article>
+    );
+  }
   return (
     <article className="rounded-lg border border-border bg-card p-3">
       <header className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -508,6 +606,21 @@ function UpdateCard({ update }: { update: ProjectDetail["updates"][number] }) {
         <span className="font-medium text-foreground">{update.author}</span>
         <span>{relativeTime(update.createdAt)}</span>
         {update.editedAt ? <span>(edited)</span> : null}
+        {mine ? (
+          <>
+            <button type="button" onClick={() => { setDraft(update.body); setEditing(true); }} className="hover:text-foreground" disabled={busy}>
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => window.confirm("Archive this update?") && void act(() => rpc.call("update_archive", { id: update.id }))}
+              className="hover:text-red-600"
+              disabled={busy}
+            >
+              Archive
+            </button>
+          </>
+        ) : null}
         <UrlLink href={update.url} target="_blank" aria-label="Open update in Linear" className="ml-auto hover:text-foreground">
           <Icon name="ExternalLink" className="size-3.5" />
         </UrlLink>

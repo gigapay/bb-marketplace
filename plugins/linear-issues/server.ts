@@ -5,7 +5,6 @@
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { hostContract, hostSignals } from "./contract.js";
-import { groupCommentThreads } from "./shared/comments.js";
 import {
   FILTER_OPTIONS_QUERY,
   PROJECTS_QUERY,
@@ -21,6 +20,16 @@ import {
   type IssueFilters,
 } from "./projects.js";
 import {
+  PROJECT_MILESTONES_QUERY,
+  createWriter,
+  issueCreateSchema,
+  issueUpdateSchema,
+  loadWriteOptions,
+  projectCreateSchema,
+  projectFieldsSchema,
+  writeOptionsSchema,
+} from "./writes.js";
+import {
   PROJECT_UPDATE_CONTEXT_QUERY,
   PROJECT_UPDATE_CREATE_MUTATION,
   buildUpdateContext,
@@ -29,6 +38,7 @@ import {
   type RawUpdateContext,
 } from "./updates/draft.js";
 import { registerLinearWorktree } from "./worktree/provider.js";
+import { registerCli } from "./cli.js";
 import { triageIssue, type TriageContext, type TriageProposal } from "./triage/engine.js";
 import { applyIssueUpdate, loadTriageContext, loadTriageIssues, openRouterJev } from "./triage/linear.js";
 import {
@@ -194,6 +204,37 @@ export const rpcContract = defineRpcContract({
       .strict(),
     output: z.object({ issues: z.array(issueSummarySchema) }),
   },
+  // ---- writes (issues, comments, projects, updates) and their pickers
+  write_options: { input: z.null(), output: writeOptionsSchema },
+  project_milestones: {
+    input: z.object({ projectId: z.string().min(1).max(100) }).strict(),
+    output: z.object({ milestones: z.array(z.object({ id: z.string(), name: z.string() })) }),
+  },
+  issue_create: { input: issueCreateSchema, output: z.object({ identifier: z.string(), url: z.string().nullable() }) },
+  issue_update: { input: issueUpdateSchema, output: z.object({ identifier: z.string() }) },
+  issue_archive: { input: z.object({ id: z.string().min(1).max(100) }).strict(), output: z.object({ ok: z.literal(true) }) },
+  comment_update: {
+    input: z.object({ id: z.string().min(1).max(100), body: z.string().trim().min(1).max(50_000) }).strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
+  comment_delete: { input: z.object({ id: z.string().min(1).max(100) }).strict(), output: z.object({ ok: z.literal(true) }) },
+  project_create: { input: projectCreateSchema, output: z.object({ id: z.string(), url: z.string().nullable() }) },
+  project_edit: {
+    input: z.object({ id: z.string().min(1).max(100), fields: projectFieldsSchema }).strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
+  project_delete: { input: z.object({ id: z.string().min(1).max(100) }).strict(), output: z.object({ ok: z.literal(true) }) },
+  update_edit: {
+    input: z
+      .object({
+        id: z.string().min(1).max(100),
+        body: z.string().trim().min(1).max(50_000).optional(),
+        health: z.enum(["onTrack", "atRisk", "offTrack"]).optional(),
+      })
+      .strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
+  update_archive: { input: z.object({ id: z.string().min(1).max(100) }).strict(), output: z.object({ ok: z.literal(true) }) },
   filter_options: {
     input: z.null(),
     output: filterOptionsSchema,
@@ -567,6 +608,8 @@ export default async function plugin(bb: BbPluginApi) {
     return body.data;
   }
 
+  const writer = createWriter(linear);
+
   async function listIssues(
     scope: IssueScope,
     includeCompleted: boolean,
@@ -821,6 +864,31 @@ export default async function plugin(bb: BbPluginApi) {
       issues: await listIssues(scope, includeCompleted, query, filters),
     }),
     filter_options: async () => flattenFilterOptions(await linear(FILTER_OPTIONS_QUERY)),
+    write_options: () => loadWriteOptions(linear),
+    project_milestones: async ({ projectId }) => {
+      const data = await linear<{ project: { projectMilestones: { nodes: { id: string; name: string; sortOrder: number }[] } } | null }>(
+        PROJECT_MILESTONES_QUERY,
+        { id: projectId },
+      );
+      const nodes = data.project?.projectMilestones.nodes ?? [];
+      return { milestones: nodes.slice().sort((a, b) => a.sortOrder - b.sortOrder).map(({ id, name }) => ({ id, name })) };
+    },
+    issue_create: async (input) => {
+      const result = await writer.createIssue(input);
+      return { identifier: result.id, url: result.url };
+    },
+    issue_update: async (input) => ({ identifier: (await writer.updateIssue(input)).id }),
+    issue_archive: async ({ id }) => (await writer.archiveIssue(id), { ok: true as const }),
+    comment_update: async ({ id, body }) => (await writer.updateComment(id, body), { ok: true as const }),
+    comment_delete: async ({ id }) => (await writer.deleteComment(id), { ok: true as const }),
+    project_create: async (input) => {
+      const result = await writer.createProject(input);
+      return { id: result.id, url: result.url };
+    },
+    project_edit: async ({ id, fields }) => (await writer.updateProject(id, fields), { ok: true as const }),
+    project_delete: async ({ id }) => (await writer.deleteProject(id), { ok: true as const }),
+    update_edit: async ({ id, ...input }) => (await writer.editUpdate(id, input), { ok: true as const }),
+    update_archive: async ({ id }) => (await writer.archiveUpdate(id), { ok: true as const }),
     projects_list: async ({ mine, includeClosed }) => {
       const clauses: Record<string, unknown>[] = [];
       if (mine) clauses.push({ or: [{ lead: { isMe: { eq: true } } }, { members: { some: { isMe: { eq: true } } } }] });
@@ -1101,107 +1169,13 @@ export default async function plugin(bb: BbPluginApi) {
     { auth: "local" },
   );
 
-  // Lets agents in a thread started from a ticket re-read it on demand.
-  const usage = [
-    "Usage:",
-    "  bb linear-issues list [--json]",
-    "  bb linear-issues show <identifier> [--json]",
-    "  bb linear-issues current [--json]     (issue linked to this thread)",
-    "  bb linear-issues link <identifier>    (link this thread to an issue)",
-    "  bb linear-issues unlink",
-  ].join("\n");
-  bb.cli.register({
-    name: "linear-issues",
-    summary: "Read your Linear issues",
-    commands: [
-      { name: "list", summary: "List your open assigned issues", usage: "bb linear-issues list [--json]" },
-      {
-        name: "show",
-        summary: "Show one issue with its description and comments",
-        usage: "bb linear-issues show <identifier> [--json]",
-      },
-      {
-        name: "current",
-        summary: "Show the issue linked to the current thread",
-        usage: "bb linear-issues current [--json]",
-      },
-      {
-        name: "link",
-        summary: "Link the current thread to an issue",
-        usage: "bb linear-issues link <identifier>",
-      },
-      { name: "unlink", summary: "Unlink the current thread", usage: "bb linear-issues unlink" },
-    ],
-    async run(argv, context) {
-      const json = argv.includes("--json");
-      const [command, ...args] = argv.filter((arg) => arg !== "--json");
-      try {
-        if (command === "list") {
-          const issues = await listIssues("assigned", false, "");
-          const text = issues.length
-            ? issues
-                .map((issue) => `${issue.identifier}  [${issue.state.name}]  ${issue.title}`)
-                .join("\n")
-            : "No open assigned issues.";
-          return { exitCode: 0, stdout: bounded(json ? JSON.stringify(issues) : text) };
-        }
-        if (command === "current" || command === "link" || command === "unlink") {
-          const threadId = context?.threadId;
-          if (threadId === undefined) {
-            return { exitCode: 1, stderr: `\`${command}\` only works from inside a BB thread.` };
-          }
-          if (command === "link") {
-            const parsed = identifierSchema.safeParse(args[0] ?? "");
-            if (!parsed.success || args.length !== 1) return { exitCode: 1, stderr: usage };
-            storeLink(threadId, parsed.data, "manual");
-            return { exitCode: 0, stdout: `Linked this thread to ${parsed.data}.` };
-          }
-          if (command === "unlink") {
-            storeLink(threadId, null, "manual");
-            return { exitCode: 0, stdout: "Unlinked this thread." };
-          }
-          const link = await linkForThread(threadId);
-          if (link === null) return { exitCode: 1, stderr: "This thread is not linked to a Linear issue." };
-          if (json) {
-            return { exitCode: 0, stdout: bounded(JSON.stringify({ ...link, issue: await getIssue(link.identifier) })) };
-          }
-          const issue = await getIssue(link.identifier);
-          return { exitCode: 0, stdout: bounded(`Linked via ${link.source}.\n\n${formatIssueText(issue)}`) };
-        }
-        if (command === "show" && args[0] !== undefined && args.length === 1) {
-          const issue = await getIssue(args[0]);
-          return {
-            exitCode: 0,
-            stdout: bounded(json ? JSON.stringify(issue) : formatIssueText(issue)),
-          };
-        }
-      } catch (cause) {
-        return { exitCode: 1, stderr: errorMessage(cause) };
-      }
-      const isHelp = command === undefined || command === "help" || command === "--help";
-      return isHelp ? { exitCode: 0, stdout: usage } : { exitCode: 1, stderr: usage };
-    },
+  registerCli(bb, {
+    linear,
+    listIssues: () => listIssues("assigned", false, ""),
+    getIssue,
+    linkForThread,
+    storeLink,
   });
-}
-
-function formatIssueText(issue: IssueDetail): string {
-  const lines = [
-    `${issue.identifier}: ${issue.title}`,
-    `URL: ${issue.url}`,
-    `State: ${issue.state.name} · Priority: ${issue.priorityLabel} · Team: ${issue.team.name}`,
-    `Branch: ${issue.branchName}`,
-  ];
-  if (issue.project) lines.push(`Project: ${issue.project.name}`);
-  if (issue.labels.length) lines.push(`Labels: ${issue.labels.map((l) => l.name).join(", ")}`);
-  lines.push("", issue.description?.trim() || "(no description)");
-  for (const thread of groupCommentThreads(issue.comments)) {
-    const status = thread.resolved ? " [resolved]" : "";
-    lines.push("", `--- ${thread.root.author.name} (${thread.root.createdAt})${status}`, thread.root.body);
-    for (const reply of thread.replies) {
-      lines.push(`    ↳ ${reply.author.name} (${reply.createdAt})`, ...reply.body.split("\n").map((line) => `      ${line}`));
-    }
-  }
-  return lines.join("\n");
 }
 
 function sleep(ms: number): Promise<void> {
