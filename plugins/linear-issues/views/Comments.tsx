@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Markdown, useRpc } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { proxyLinearUploads } from "@/lib/uploads";
+import { LinearMarkdown } from "./LinearMarkdown";
 import { cn } from "@/lib/utils";
 import type { IssueComment, IssueDetail, rpcContract } from "../server";
 import { groupCommentThreads, type CommentThread } from "../shared/comments";
@@ -189,7 +189,7 @@ function CommentBody({ comment, onChanged }: { comment: IssueComment; onChanged:
           </div>
         </div>
       ) : (
-        <Markdown content={proxyLinearUploads(comment.body)} />
+        <LinearMarkdown content={comment.body} />
       )}
     </div>
   );

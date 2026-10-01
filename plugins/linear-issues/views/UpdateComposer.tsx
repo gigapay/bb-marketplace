@@ -4,7 +4,7 @@ import { Markdown, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
-import { proxyLinearUploads } from "@/lib/uploads";
+import { LinearMarkdown } from "./LinearMarkdown";
 import { cn } from "@/lib/utils";
 import type { rpcContract } from "../server";
 import { errorText } from "./shared";
@@ -223,7 +223,7 @@ export function UpdateComposer({
       {preview ? (
         <div className="min-h-32 rounded-md border border-border bg-background px-3 py-2">
           {body.trim() ? (
-            <Markdown content={proxyLinearUploads(body)} />
+            <LinearMarkdown content={body} />
           ) : (
             <p className="text-sm italic text-muted-foreground">Nothing to preview yet.</p>
           )}

@@ -40,7 +40,7 @@ BB's sidebar belongs to its bundled thread-list plugin, which has no extension p
 
 ## Images and attachments
 
-Linear serves pasted images and attachments from `uploads.linear.app` only when the request carries the API key. The server exposes `GET /api/v1/plugins/linear-issues/http/upload?url=…` (auth `local`), which fetches the file with the key and streams it back. It only proxies `https://uploads.linear.app`, so the key can't be sent anywhere else. `lib/uploads.ts` rewrites those URLs in descriptions and comments before they reach `Markdown`. Non-image files are served as downloads, and responses carry `nosniff` plus a sandboxing CSP.
+Linear serves pasted images and attachments from `uploads.linear.app` only when the request carries the API key. The server exposes `GET /api/v1/plugins/linear-issues/http/upload?url=…` (auth `local`), which fetches the file with the key and streams it back. It only proxies `https://uploads.linear.app`, so the key can't be sent anywhere else. `lib/uploads.ts` rewrites those URLs in descriptions, comments and project text before they reach `Markdown`. `views/LinearMarkdown.tsx` wraps every such render: a click on a link to an upload opens it in an in-plugin viewer (image, video or PDF, otherwise a download) instead of a browser tab, fetching the file through the proxy as a blob. Non-image files are served as downloads, and responses carry `nosniff` plus a sandboxing CSP.
 
 ## Writing to Linear
 
