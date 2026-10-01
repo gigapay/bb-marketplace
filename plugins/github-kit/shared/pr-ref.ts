@@ -26,3 +26,23 @@ function toRef(owner: string, name: string, number: string): PrRef | null {
   if (!NAME.test(owner) || !NAME.test(name) || !Number.isSafeInteger(parsed) || parsed < 1) return null;
   return { owner, name, number: parsed };
 }
+
+/**
+ * What a user types to name a PR: a URL, owner/repo#123, or just #123 / 123
+ * (the repo then comes from context). null when it's none of those.
+ */
+export function parsePrReference(input: string): PrRef | { number: number } | null {
+  const value = input.trim();
+  const fromUrl = parsePrUrl(value);
+  if (fromUrl) return fromUrl;
+  const fromKey = parsePrKey(value);
+  if (fromKey) return fromKey;
+  const bare = /^#?(\d{1,9})$/.exec(value);
+  if (bare) {
+    const number = Number(bare[1]);
+    return number >= 1 ? { number } : null;
+  }
+  return null;
+}
+
+export const LINKS_CHANGED = "links-changed";

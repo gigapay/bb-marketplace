@@ -4,19 +4,47 @@ import { useCallback, useEffect, useState } from "react";
 import {
   experimental_useSidebarThreadPullRequest as useThreadPullRequest,
   experimental_useSidebarThreads as useSidebarThreads,
+  useRealtime,
   useRpc,
 } from "@get-bb/plugin-sdk/app";
 import type { PrDetail } from "../detail";
 import type { rpcContract } from "../server";
-import { parsePrKey, parsePrUrl, prKey } from "../shared/pr-ref";
+import { LINKS_CHANGED, parsePrKey, parsePrUrl, prKey } from "../shared/pr-ref";
 
 type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
 
+export type LinkSource = "manual" | "branch";
+
 export type ThreadPrState =
   | { status: "loading" }
-  | { status: "none"; branch: string | null }
+  | { status: "none"; branch: string | null; unlinked: boolean }
   | { status: "error"; error: string }
-  | { status: "found"; key: string };
+  | { status: "found"; key: string; source: LinkSource };
+
+/** The thread's stored link, kept live across every view through realtime. */
+export function useStoredLink(threadId: string | null): { stored: boolean; key: string | null } | null {
+  const rpc = useRpc<typeof rpcContract>();
+  const [link, setLink] = useState<{ threadId: string; stored: boolean; key: string | null } | null>(null);
+  const [nonce, setNonce] = useState(0);
+  useRealtime(LINKS_CHANGED, (payload) => {
+    if (typeof payload === "object" && payload !== null && (payload as { threadId?: unknown }).threadId === threadId) {
+      setNonce((value) => value + 1);
+    }
+  });
+  useEffect(() => {
+    if (threadId === null) return;
+    let cancelled = false;
+    rpc.call("link_get", { threadId }).then(
+      (result) => !cancelled && setLink({ threadId, ...result }),
+      // Links are secondary: on failure fall back to the branch.
+      () => !cancelled && setLink({ threadId, stored: false, key: null }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [rpc, threadId, nonce]);
+  return link !== null && link.threadId === threadId ? link : null;
+}
 
 const branchLookups = new Map<string, Promise<string | null>>();
 
@@ -27,13 +55,14 @@ const branchLookups = new Map<string, Promise<string | null>>();
  */
 export function useThreadPrKey(threadId: string | null): ThreadPrState {
   const rpc = useRpc<typeof rpcContract>();
+  const stored = useStoredLink(threadId);
   const core = useThreadPullRequest(threadId ?? "");
   const { threads, status } = useSidebarThreads();
   const branch = threads.find((thread) => thread.id === threadId)?.environment?.branchName ?? null;
   const fromCore = core.pullRequest ? parsePrUrl(core.pullRequest.url) : null;
   const [fallback, setFallback] = useState<{ branch: string; key: string | null } | { branch: string; error: string } | null>(null);
 
-  const needsFallback = threadId !== null && fromCore === null && !core.isLoading && branch !== null;
+  const needsFallback = threadId !== null && stored !== null && !stored.stored && fromCore === null && !core.isLoading && branch !== null;
   useEffect(() => {
     if (!needsFallback || fallback?.branch === branch) return;
     let cancelled = false;
@@ -56,14 +85,20 @@ export function useThreadPrKey(threadId: string | null): ThreadPrState {
     };
   }, [rpc, needsFallback, branch, fallback?.branch]);
 
-  if (threadId === null) return { status: "none", branch: null };
-  if (fromCore !== null) return { status: "found", key: prKey(fromCore) };
+  if (threadId === null) return { status: "none", branch: null, unlinked: false };
+  // A manual link (or unlink) wins over anything the branch says.
+  if (stored === null) return { status: "loading" };
+  if (stored.stored) {
+    const ref = stored.key === null ? null : parsePrKey(stored.key);
+    return ref === null ? { status: "none", branch, unlinked: true } : { status: "found", key: prKey(ref), source: "manual" };
+  }
+  if (fromCore !== null) return { status: "found", key: prKey(fromCore), source: "branch" };
   if (core.isLoading || status === "loading") return { status: "loading" };
-  if (branch === null) return { status: "none", branch: null };
+  if (branch === null) return { status: "none", branch: null, unlinked: false };
   if (fallback?.branch !== branch) return { status: "loading" };
   if ("error" in fallback) return { status: "error", error: fallback.error };
   const ref = fallback.key === null ? null : parsePrKey(fallback.key);
-  return ref === null ? { status: "none", branch } : { status: "found", key: prKey(ref) };
+  return ref === null ? { status: "none", branch, unlinked: false } : { status: "found", key: prKey(ref), source: "branch" };
 }
 
 // One entry per PR, shared by the tab and every diff file card. A refresh
