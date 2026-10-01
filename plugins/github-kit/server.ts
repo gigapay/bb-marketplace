@@ -175,6 +175,16 @@ export const rpcContract = defineRpcContract({
     input: z.object({ threadId: threadIdSchema, key: prKeySchema }).strict(),
     output: z.object({ queued: z.number() }),
   },
+  // Merges now, guarded by the head the user saw.
+  pr_merge: {
+    input: z.object({ key: prKeySchema, method: z.enum(["MERGE", "SQUASH", "REBASE"]), expectedHeadSha: z.string().regex(SHA_PATTERN) }).strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
+  // Turns GitHub's auto-merge on (merge once requirements pass) or off.
+  pr_auto_merge: {
+    input: z.object({ key: prKeySchema, enabled: z.boolean(), method: z.enum(["MERGE", "SQUASH", "REBASE"]) }).strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
   // Thread ↔ PR links. A stored link wins over the branch lookup; a stored
   // null is an explicit unlink that hides it.
   link_get: {
@@ -596,6 +606,32 @@ export default async function plugin(bb: BbPluginApi) {
         }`,
         { id: pr.id, method, head: pr.headRefOid },
       );
+      return { ok: true as const };
+    },
+    pr_merge: async ({ key, method, expectedHeadSha }) => {
+      const pr = await prState(key);
+      if (pr.state !== "OPEN" || pr.isDraft) throw new Error("Only an open, non-draft pull request can be merged.");
+      // A push since the page loaded means the user hasn't seen what they'd merge.
+      if (!pr.headRefOid.startsWith(expectedHeadSha)) throw new Error("New commits were pushed since you loaded this PR. Refresh and check them first.");
+      await github(
+        `mutation Merge($id: ID!, $method: PullRequestMergeMethod!, $head: GitObjectID!) {
+          mergePullRequest(input: { pullRequestId: $id, mergeMethod: $method, expectedHeadOid: $head }) { clientMutationId }
+        }`,
+        { id: pr.id, method, head: pr.headRefOid },
+      );
+      return { ok: true as const };
+    },
+    pr_auto_merge: async ({ key, enabled, method }) => {
+      const pr = await prState(key);
+      if (pr.state !== "OPEN") throw new Error("Auto-merge only applies to an open pull request.");
+      if (enabled) {
+        await github(
+          `mutation Auto($id: ID!, $method: PullRequestMergeMethod!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $method }) { clientMutationId } }`,
+          { id: pr.id, method },
+        );
+      } else {
+        await github(`mutation NoAuto($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }`, { id: pr.id });
+      }
       return { ok: true as const };
     },
     pr_set_state: async ({ key, state }) => {

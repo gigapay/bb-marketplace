@@ -79,6 +79,13 @@ export const prDetailSchema = z.object({
   // GitHub refuses approve / request changes on your own PR.
   viewerLogin: z.string(),
   viewerIsAuthor: z.boolean(),
+  // What the repository allows, for the Merge button and auto-merge toggle.
+  merge: z.object({
+    methods: z.array(z.enum(["MERGE", "SQUASH", "REBASE"])),
+    defaultMethod: z.enum(["MERGE", "SQUASH", "REBASE"]),
+    autoMergeAllowed: z.boolean(),
+    autoMerge: z.object({ method: z.string(), enabledBy: z.string().nullable() }).nullable(),
+  }),
 });
 export type PrDetail = z.infer<typeof prDetailSchema>;
 
@@ -92,7 +99,8 @@ export const PR_DETAIL_QUERY = `query PullRequest($owner: String!, $name: String
       additions deletions changedFiles headRefName baseRefName reviewDecision mergeStateStatus
       commitCount: commits { totalCount }
       files(first: 100) { nodes { path additions deletions } }
-      repository { nameWithOwner }
+      repository { nameWithOwner autoMergeAllowed mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed viewerDefaultMergeMethod }
+      autoMergeRequest { mergeMethod enabledBy { login } }
       ${ACTOR}
       labels(first: 20) { nodes { name color } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
@@ -133,7 +141,15 @@ export type RawPrDetail = {
   headRefName: string;
   baseRefName: string;
   reviewDecision: PrDetail["reviewDecision"];
-  repository: { nameWithOwner: string };
+  repository: {
+    nameWithOwner: string;
+    autoMergeAllowed: boolean;
+    mergeCommitAllowed: boolean;
+    squashMergeAllowed: boolean;
+    rebaseMergeAllowed: boolean;
+    viewerDefaultMergeMethod: "MERGE" | "SQUASH" | "REBASE";
+  };
+  autoMergeRequest: { mergeMethod: string; enabledBy: { login: string } | null } | null;
   author: RawActor;
   labels: Nodes<{ name: string; color: string }>;
   commits: Nodes<{ commit: { statusCheckRollup: { state: PrDetail["checks"] } | null } }>;
@@ -248,6 +264,18 @@ export function normalizeDetail(raw: RawPrDetail, key: string, viewerLogin: stri
     headRefName: raw.headRefName,
     baseRefName: raw.baseRefName,
     repository: raw.repository.nameWithOwner,
+    merge: {
+      methods: [
+        ...(raw.repository.mergeCommitAllowed ? (["MERGE"] as const) : []),
+        ...(raw.repository.squashMergeAllowed ? (["SQUASH"] as const) : []),
+        ...(raw.repository.rebaseMergeAllowed ? (["REBASE"] as const) : []),
+      ],
+      defaultMethod: raw.repository.viewerDefaultMergeMethod,
+      autoMergeAllowed: raw.repository.autoMergeAllowed,
+      autoMerge: raw.autoMergeRequest
+        ? { method: raw.autoMergeRequest.mergeMethod, enabledBy: raw.autoMergeRequest.enabledBy?.login ?? null }
+        : null,
+    },
     reviewDecision: raw.reviewDecision,
     checks: raw.commits.nodes[0]?.commit.statusCheckRollup?.state ?? null,
     author: toActor(raw.author),
