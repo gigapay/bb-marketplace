@@ -85,7 +85,7 @@ export function Discussion({
             {item.replies.length} {item.replies.length === 1 ? "reply" : "replies"}
           </span>
         ) : null}
-        <UrlLink href={item.url} target="_blank" aria-label="Open on GitHub" className="text-muted-foreground hover:text-foreground">
+        <UrlLink data-github-kit-external="" href={item.url} target="_blank" aria-label="Open on GitHub" className="text-muted-foreground hover:text-foreground">
           <Icon name="ExternalLink" className="size-3.5" />
         </UrlLink>
         <button

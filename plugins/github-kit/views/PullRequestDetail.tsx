@@ -108,7 +108,7 @@ export function PullRequestDetail({
             <Button variant="ghost" size="icon" aria-label="Copy link" onClick={() => copyLink(pr.url)}>
               <Icon name="Copy" className="size-4" />
             </Button>
-            <UrlLink href={pr.url} target="_blank" aria-label="Open on GitHub" className="inline-flex size-9 items-center justify-center text-muted-foreground hover:text-foreground">
+            <UrlLink data-github-kit-external="" href={pr.url} target="_blank" aria-label="Open on GitHub" className="inline-flex size-9 items-center justify-center text-muted-foreground hover:text-foreground">
               <Icon name="ExternalLink" className="size-4" />
             </UrlLink>
           </>
@@ -590,7 +590,7 @@ function SidebarChecks({
             <div className="overflow-y-auto p-1">
               {sorted.length === 0 ? <p className="px-3 py-2 text-sm text-muted-foreground">No check matches.</p> : null}
               {sorted.map((check) => (
-                <UrlLink
+                <UrlLink data-github-kit-external=""
                   key={check.id}
                   href={check.url ?? pr.url + "/checks"}
                   target="_blank"
@@ -611,7 +611,7 @@ function SidebarChecks({
         )}
       </Popover>
       {[...failing, ...running].slice(0, 6).map((check) => (
-        <UrlLink
+        <UrlLink data-github-kit-external=""
           key={check.id}
           href={check.url ?? pr.url + "/checks"}
           target="_blank"
