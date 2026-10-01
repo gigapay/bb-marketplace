@@ -8,6 +8,7 @@
     { "name": "github-kit", "source": "./plugins/github-kit" },
     { "name": "pi-provider", "source": "./plugins/pi-provider" },
     { "name": "machine-stats", "source": "./plugins/machine-stats" },
-    { "name": "traefik-stacks", "source": "./plugins/traefik-stacks" }
+    { "name": "traefik-stacks", "source": "./plugins/traefik-stacks" },
+    { "name": "browser-markup", "source": "./plugins/browser-markup" }
   ]
 }
