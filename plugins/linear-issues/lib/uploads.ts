@@ -7,3 +7,17 @@ export function proxyLinearUploads(markdown: string): string {
   const base = `${window.location.origin}${PROXY_PATH}?url=`;
   return markdown.replace(UPLOAD_URL, (url) => base + encodeURIComponent(url));
 }
+
+/** The proxied URL for a link, if it points at a Linear upload (raw or proxied). */
+export function uploadProxyUrl(href: string): string | null {
+  try {
+    const url = new URL(href, window.location.href);
+    if (url.origin === window.location.origin && url.pathname === PROXY_PATH) return url.href;
+    if (url.protocol === "https:" && url.hostname === "uploads.linear.app") {
+      return `${window.location.origin}${PROXY_PATH}?url=${encodeURIComponent(url.href)}`;
+    }
+  } catch {
+    // Not a URL we handle.
+  }
+  return null;
+}

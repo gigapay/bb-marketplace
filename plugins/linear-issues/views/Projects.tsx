@@ -4,7 +4,7 @@ import { Markdown, UrlLink, useRpc } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Icon } from "@/components/ui/icon";
-import { proxyLinearUploads } from "@/lib/uploads";
+import { LinearMarkdown } from "./LinearMarkdown";
 import { cn } from "@/lib/utils";
 import type { ProjectDetail, ProjectSummary } from "../projects";
 import type { IssueSummary, rpcContract } from "../server";
@@ -398,7 +398,7 @@ export function ProjectDetailView({
                 ) : null}
                 <Section title="Description">
                   {project.content?.trim() ? (
-                    <Markdown content={proxyLinearUploads(project.content)} />
+                    <LinearMarkdown content={project.content} />
                   ) : (
                     <p className="text-sm italic text-muted-foreground">No description.</p>
                   )}
@@ -625,7 +625,7 @@ function UpdateCard({ update, onChanged }: { update: ProjectDetail["updates"][nu
           <Icon name="ExternalLink" className="size-3.5" />
         </UrlLink>
       </header>
-      <Markdown content={proxyLinearUploads(update.body)} />
+      <LinearMarkdown content={update.body} />
     </article>
   );
 }

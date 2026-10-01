@@ -12,7 +12,7 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { proxyLinearUploads } from "@/lib/uploads";
+import { LinearMarkdown } from "./LinearMarkdown";
 import { buildIssuePrompt } from "@/lib/prompt";
 import type { IssueDetail as Issue, rpcContract } from "../server";
 import { SOURCE_LABELS, useIssueLinks, type LinkedThread } from "./links";
@@ -420,7 +420,7 @@ function IssueBody({ issue, onChanged }: { issue: Issue; onChanged: () => void }
             </div>
           </div>
         ) : issue.description?.trim() ? (
-          <Markdown content={proxyLinearUploads(issue.description)} />
+          <LinearMarkdown content={issue.description} />
         ) : (
           <p className="text-sm italic text-muted-foreground">No description.</p>
         )}
