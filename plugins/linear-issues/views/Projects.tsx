@@ -196,7 +196,8 @@ export function ProjectDetailView({
 }: {
   projectId: string;
   initialTab?: "overview" | "updates" | "issues";
-  onBack: () => void;
+  /** Omitted in the thread side panel, which has no list to go back to. */
+  onBack?: () => void;
   onOpenIssue: (identifier: string) => void;
 }) {
   const rpc = useRpc<typeof rpcContract>();
@@ -266,10 +267,12 @@ export function ProjectDetailView({
 
   return (
     <div>
-      <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={onBack}>
-        <Icon name="ArrowLeft" className="size-4" />
-        Projects
-      </Button>
+      {onBack ? (
+        <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={onBack}>
+          <Icon name="ArrowLeft" className="size-4" />
+          Projects
+        </Button>
+      ) : null}
       <ErrorLine error={error} />
       {project === null ? (
         error === null ? (
@@ -302,7 +305,7 @@ export function ProjectDetailView({
                 rpc.call("project_delete", { id: project.id }).then(
                   () => {
                     toast.success("Project moved to the trash");
-                    onBack();
+                    onBack?.();
                   },
                   (cause) => toast.error(errorText(cause)),
                 );
@@ -311,7 +314,7 @@ export function ProjectDetailView({
               <Icon name="Trash2" className="size-4" />
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <UrlLink href={project.url} target="_blank">
+              <UrlLink href={project.url} target="_blank" data-linear-external="">
                 <Icon name="ExternalLink" className="size-4" />
                 Open in Linear
               </UrlLink>
@@ -622,7 +625,7 @@ function UpdateCard({ update, onChanged }: { update: ProjectDetail["updates"][nu
             </button>
           </>
         ) : null}
-        <UrlLink href={update.url} target="_blank" aria-label="Open update in Linear" className="ml-auto hover:text-foreground">
+        <UrlLink href={update.url} target="_blank" data-linear-external="" aria-label="Open update in Linear" className="ml-auto hover:text-foreground">
           <Icon name="ExternalLink" className="size-3.5" />
         </UrlLink>
       </header>

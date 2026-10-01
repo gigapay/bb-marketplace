@@ -192,7 +192,7 @@ function IssueBody({ issue, onChanged }: { issue: Issue; onChanged: () => void }
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" size="sm" asChild>
-            <UrlLink href={issue.url} target="_blank">
+            <UrlLink href={issue.url} target="_blank" data-linear-external="">
               <Icon name="ExternalLink" className="size-4" />
               Open in Linear
             </UrlLink>
