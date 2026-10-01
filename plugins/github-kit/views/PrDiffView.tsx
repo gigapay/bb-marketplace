@@ -44,6 +44,11 @@ function fileId(path: string): string {
 const REVIEWED_CLASS = "text-indigo-400";
 const UPDATED_DOT_CLASS = "bg-orange-400";
 
+// Keeps the active tree row visible as the diff scrolls past many files.
+function scrollTreeRowIntoView(element: HTMLButtonElement | null) {
+  element?.scrollIntoView({ block: "nearest" });
+}
+
 function splitPath(path: string): { name: string; dir: string } {
   const index = path.lastIndexOf("/");
   return index === -1 ? { name: path, dir: "" } : { name: path.slice(index + 1), dir: path.slice(0, index + 1) };
@@ -169,22 +174,33 @@ export function PrDiffView({
   // to it once the diff loads again.
   const orderedKey = ordered.map((file) => file.path).join("\n");
   const orderedPaths = useMemo(() => (orderedKey === "" ? [] : orderedKey.split("\n")), [orderedKey]);
+  // The file under the top edge of the scroll area is the active one: it's
+  // highlighted in the tree, and remembered for the next visit.
+  const [activePath, setActivePath] = useState<string | null>(null);
   useEffect(() => {
     if (orderedPaths.length === 0) return;
     let frame = 0;
+    let scroller: Element | null = null;
     const track = () => {
       frame = 0;
+      // The page scrolls inside BB's panel; measure from that panel's top.
+      const top = (scroller?.getBoundingClientRect().top ?? 0) + 56;
       for (const path of orderedPaths) {
         const rect = document.getElementById(fileId(path))?.getBoundingClientRect();
-        if (rect && rect.bottom > 120) {
+        if (rect && rect.bottom > top) {
+          setActivePath(path);
           writeUi(`file.${pr.key}`, path);
           return;
         }
       }
     };
-    const onScroll = () => {
+    const onScroll = (event: Event) => {
+      // Ignore scrolls inside the file tree or a diff's own horizontal scroll.
+      if (event.target instanceof Element && !event.target.contains(document.getElementById(fileId(orderedPaths[0]!)))) return;
+      scroller = event.target instanceof Element ? event.target : null;
       if (frame === 0) frame = requestAnimationFrame(track);
     };
+    frame = requestAnimationFrame(track);
     // Capture: the page scrolls inside BB's panel, not the window.
     window.addEventListener("scroll", onScroll, true);
     return () => {
@@ -318,7 +334,12 @@ export function PrDiffView({
                               type="button"
                               onClick={() => jumpTo(file)}
                               title={file.path}
-                              className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-sm hover:bg-accent/50"
+                              ref={activePath === file.path ? scrollTreeRowIntoView : undefined}
+                              aria-current={activePath === file.path ? "true" : undefined}
+                              className={cn(
+                                "flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm hover:bg-accent/50",
+                                activePath === file.path && "bg-accent text-accent-foreground hover:bg-accent",
+                              )}
                             >
                               <span
                                 className={cn(
@@ -408,8 +429,14 @@ function FileCard({
   const { name, dir } = splitPath(file.path);
   const patch = useMemo(() => (file.patch === null ? null : toGitPatch({ ...file, patch: file.patch })), [file]);
   return (
-    <section id={fileId(file.path)} className="scroll-mt-2 overflow-hidden rounded-lg border border-border bg-card">
-      <header className="flex items-center gap-2 px-3 py-2 text-sm">
+    // No overflow-hidden here: it would break the sticky header.
+    <section id={fileId(file.path)} className="scroll-mt-2 rounded-lg border border-border bg-card">
+      <header
+        className={cn(
+          "sticky top-0 z-10 flex items-center gap-2 rounded-t-lg border-b border-transparent bg-card px-3 py-2 text-sm",
+          expanded ? "border-border" : "rounded-b-lg",
+        )}
+      >
         <button type="button" onClick={onToggle} aria-expanded={expanded} aria-label={expanded ? "Collapse file" : "Expand file"} className="text-muted-foreground hover:text-foreground">
           <Icon name="ChevronRight" className={cn("size-4 transition-transform", expanded && "rotate-90")} />
         </button>
@@ -458,14 +485,14 @@ function FileCard({
       </header>
       {expanded ? (
         patch === null ? (
-          <p className="border-t border-border px-3 py-3 text-sm text-muted-foreground">
+          <p className="px-3 py-3 text-sm text-muted-foreground">
             {file.status === "renamed" && file.additions + file.deletions === 0
               ? "Renamed without changes."
               : "No diff to show here (binary or too large). Open it on GitHub."}
           </p>
         ) : (
           <LazyMount>
-            <div className="border-t border-border">
+            <div className="overflow-hidden rounded-b-lg">
               <AnnotatedDiff
                 patch={patch}
                 view={view}
