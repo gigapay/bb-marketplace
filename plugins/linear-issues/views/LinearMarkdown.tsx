@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import type { MouseEvent } from "react";
-import { Markdown } from "@get-bb/plugin-sdk/app";
+import { Markdown, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
 import { proxyLinearUploads, uploadProxyUrl } from "@/lib/uploads";
 import { EmptyState } from "./shared";
+import { parseLinearUrl } from "../shared/linear-url";
 
 type Attachment = { url: string; name: string };
 
@@ -16,13 +17,25 @@ type Attachment = { url: string; name: string };
  */
 export function LinearMarkdown({ content }: { content: string }) {
   const [attachment, setAttachment] = useState<Attachment | null>(null);
+  const navigate = useBbNavigate();
 
   // Capture phase: runs before the link's own handler, which would route
   // the click to a browser.
   const onClickCapture = (event: MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
     const anchor = (event.target as HTMLElement).closest("a");
-    if (!anchor) return;
+    if (!anchor || anchor.hasAttribute("data-linear-external")) return;
+    // In a thread, the header's listener already sent these to the side
+    // panel; here (the Linear page) they open in the page itself.
+    const linear = parseLinearUrl(anchor.href);
+    if (linear !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      navigate.toPluginPanel("issues", {
+        subPath: linear.kind === "issue" ? linear.identifier : `projects/${linear.id}`,
+      });
+      return;
+    }
     const url = uploadProxyUrl(anchor.getAttribute("href") ?? "");
     if (url === null) return;
     event.preventDefault();

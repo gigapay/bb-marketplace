@@ -9,19 +9,62 @@ import { Icon } from "@/components/ui/icon";
 import { LinearMarkdown } from "./LinearMarkdown";
 import type { IssueDetail, rpcContract } from "../server";
 import { issueIdentifierFromBranch } from "../shared/links";
+import { readPanelTarget, type LinearTarget } from "../shared/linear-url";
 import { SOURCE_LABELS, useIssueLinks } from "./links";
 import { CommentThreads } from "./Comments";
+import { ProjectDetailView } from "./Projects";
 import { IssuePickerDialog } from "./pickers";
 import { EmptyState, ErrorLine, LabelChip, PriorityIcon, StateIcon, errorText } from "./shared";
 
 export const THREAD_PANEL_ACTION_ID = "linear-issue";
 
+type Navigate = ReturnType<typeof useBbNavigate>;
+
+/**
+ * Opens an issue or project in this thread's side panel. The thread's own
+ * issue uses the regular tab; anything else gets a tab of its own. Returns
+ * false when the surface has no thread side panel.
+ */
+export function openLinearTarget(navigate: Navigate, target: LinearTarget, threadIssue: string | null): boolean {
+  if (target.kind === "issue") {
+    return target.identifier === threadIssue
+      ? navigate.openThreadPanel({ actionId: THREAD_PANEL_ACTION_ID, title: target.identifier })
+      : navigate.openThreadPanel({ actionId: THREAD_PANEL_ACTION_ID, title: target.identifier, params: target });
+  }
+  return navigate.openThreadPanel({ actionId: THREAD_PANEL_ACTION_ID, title: "Project", params: target });
+}
+
 /**
  * The thread side-panel tab. BB always lists it in the panel launcher, so
  * it follows the thread's link live: the ticket when linked, a picker when not.
  */
-export function ThreadLinearPanel({ threadId }: PluginThreadPanelProps) {
+export function ThreadLinearPanel({ threadId, params }: PluginThreadPanelProps) {
+  const target = readPanelTarget(params);
+  if (target?.kind === "project") return <ProjectInPanel threadId={threadId} projectId={target.id} />;
+  return <IssuePanel threadId={threadId} issue={target?.kind === "issue" ? target.identifier : null} />;
+}
+
+/** A project opened from a link in the thread, in its own tab. */
+function ProjectInPanel({ threadId, projectId }: { threadId: string; projectId: string }) {
+  const navigate = useBbNavigate();
+  const links = useIssueLinks();
+  const threadIssue = links.byThread.get(threadId)?.identifier ?? null;
+  return (
+    <ProjectDetailView
+      projectId={projectId}
+      onOpenIssue={(identifier) => openLinearTarget(navigate, { kind: "issue", identifier }, threadIssue)}
+    />
+  );
+}
+
+/**
+ * The thread's own issue (no `issue`), or another issue opened from a link.
+ * Only the thread's own tab offers link/change/unlink; another issue offers
+ * to become the thread's issue.
+ */
+function IssuePanel({ threadId, issue: otherIssue }: { threadId: string; issue: string | null }) {
   const rpc = useRpc<typeof rpcContract>();
+  const navigate = useBbNavigate();
   const links = useIssueLinks();
   const [pickerOpen, setPickerOpen] = useState(false);
   const link = links.byThread.get(threadId) ?? null;
@@ -40,6 +83,24 @@ export function ThreadLinearPanel({ threadId }: PluginThreadPanelProps) {
 
   if (!links.ready) return <EmptyState>Loading…</EmptyState>;
 
+  const openTarget = (target: LinearTarget) => openLinearTarget(navigate, target, link?.identifier ?? null);
+
+  if (otherIssue !== null && otherIssue !== link?.identifier) {
+    return (
+      <LinkedIssue
+        identifier={otherIssue}
+        sourceLabel="Opened from a link"
+        onOpenTarget={openTarget}
+        actions={
+          <Button size="sm" variant="outline" onClick={() => void run(rpc.call("link_set", { threadId, identifier: otherIssue }), `Linked to ${otherIssue}`)}>
+            <Icon name="Plus" className="size-4" />
+            Link to this thread
+          </Button>
+        }
+      />
+    );
+  }
+
   return (
     <div>
       {link === null ? (
@@ -54,6 +115,7 @@ export function ThreadLinearPanel({ threadId }: PluginThreadPanelProps) {
         <LinkedIssue
           identifier={link.identifier}
           sourceLabel={SOURCE_LABELS[link.source]}
+          onOpenTarget={openTarget}
           actions={
             <>
               <Button size="sm" variant="outline" onClick={() => setPickerOpen(true)}>
@@ -90,7 +152,9 @@ function LinkedIssue({
   identifier,
   sourceLabel,
   actions,
+  onOpenTarget,
 }: {
+  onOpenTarget: (target: LinearTarget) => void;
   identifier: string;
   sourceLabel: string;
   actions: ReactNode;
@@ -154,7 +218,7 @@ function LinkedIssue({
         <>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" asChild>
-              <UrlLink href={issue.url} target="_blank">
+              <UrlLink href={issue.url} target="_blank" data-linear-external="">
                 <Icon name="ExternalLink" className="size-4" />
                 Linear
               </UrlLink>
@@ -180,7 +244,17 @@ function LinkedIssue({
               </span>
             </Meta>
             <Meta label="Assignee">{issue.assignee?.name ?? "Unassigned"}</Meta>
-            {issue.project ? <Meta label="Project">{issue.project.name}</Meta> : null}
+            {issue.project ? (
+              <Meta label="Project">
+                <button
+                  type="button"
+                  onClick={() => onOpenTarget({ kind: "project", id: issue.project!.id })}
+                  className="truncate underline-offset-2 hover:underline"
+                >
+                  {issue.project.name}
+                </button>
+              </Meta>
+            ) : null}
             {issue.cycle ? <Meta label="Cycle">{issue.cycle.name ?? `Cycle ${issue.cycle.number}`}</Meta> : null}
             <Meta label="Branch">
               <span className="font-mono text-xs">{issue.branchName}</span>
@@ -209,10 +283,16 @@ function LinkedIssue({
               <h3 className="mb-1.5 text-sm font-medium">Sub-issues</h3>
               <ul className="space-y-1">
                 {issue.children.map((child) => (
-                  <li key={child.id} className="flex items-center gap-2 text-sm">
-                    <StateIcon state={child.state} />
-                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{child.identifier}</span>
-                    <span className="min-w-0 truncate">{child.title}</span>
+                  <li key={child.id}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenTarget({ kind: "issue", identifier: child.identifier })}
+                      className="flex w-full items-center gap-2 rounded px-1 text-left text-sm hover:bg-accent/50"
+                    >
+                      <StateIcon state={child.state} />
+                      <span className="shrink-0 font-mono text-xs text-muted-foreground">{child.identifier}</span>
+                      <span className="min-w-0 truncate">{child.title}</span>
+                    </button>
                   </li>
                 ))}
               </ul>

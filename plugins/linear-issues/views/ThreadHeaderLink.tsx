@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LINEAR_ICON } from "@/lib/plugin-id";
 import { toast } from "sonner";
 import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
@@ -16,7 +16,8 @@ import { issueIdentifierFromBranch } from "../shared/links";
 import type { IssueSummary, rpcContract } from "../server";
 import { SOURCE_LABELS, useIssueLinks } from "./links";
 import { IssuePickerDialog } from "./pickers";
-import { THREAD_PANEL_ACTION_ID } from "./ThreadLinearPanel";
+import { THREAD_PANEL_ACTION_ID, openLinearTarget } from "./ThreadLinearPanel";
+import { parseLinearUrl } from "../shared/linear-url";
 import { errorText } from "./shared";
 
 export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHeaderActionProps) {
@@ -31,6 +32,29 @@ export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHe
   const thread = links.threads.find((candidate) => candidate.id === threadId);
   const branchMatch = issueIdentifierFromBranch(thread?.environment?.branchName, links.teamKeys);
   const hasStoredRow = links.rows.has(threadId);
+  // Read inside the click handler without re-binding it on every change.
+  const threadIssue = useRef<string | null>(null);
+  threadIssue.current = link?.identifier ?? null;
+
+  // A Linear issue or project link clicked anywhere in this thread (chat
+  // messages, the side panel) opens in the side panel instead of the browser.
+  // This header lives as long as the thread is shown, so it owns the listener;
+  // capture runs before the host's own link handler. Cmd/Ctrl/Shift/Alt-click,
+  // middle click and our explicit "Open in Linear" links still go to Linear.
+  useEffect(() => {
+    const onClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!(anchor instanceof HTMLAnchorElement) || anchor.hasAttribute("data-linear-external")) return;
+      const target = parseLinearUrl(anchor.href);
+      if (target === null) return;
+      if (!openLinearTarget(navigate, target, threadIssue.current)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [navigate, threadId]);
 
   // Title and state for the chip and dialog; one small request per header.
   useEffect(() => {
