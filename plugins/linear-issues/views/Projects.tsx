@@ -237,14 +237,18 @@ export function ProjectDetailView({
     setMilestoneId(null);
   }, [projectId]);
 
+  // Links open a project by its URL slugId, which `project(id:)` accepts but
+  // the issue filter doesn't: filter on the id Linear resolved it to.
+  const resolvedId = project?.id ?? null;
   const loadIssues = useCallback(() => {
+    if (resolvedId === null) return;
     let cancelled = false;
     rpc
       .call("issues_list", {
         scope: "all",
         includeCompleted,
         query: "",
-        filters: { labelIds: [], priorities: [], projectIds: [projectId] },
+        filters: { labelIds: [], priorities: [], projectIds: [resolvedId] },
       })
       .then(
         (result) => !cancelled && setIssues(result.issues),
@@ -253,7 +257,7 @@ export function ProjectDetailView({
     return () => {
       cancelled = true;
     };
-  }, [rpc, projectId, includeCompleted]);
+  }, [rpc, resolvedId, includeCompleted]);
   useEffect(() => loadIssues(), [loadIssues]);
 
   // What the Issues tab shows, and what its triage button works on.
