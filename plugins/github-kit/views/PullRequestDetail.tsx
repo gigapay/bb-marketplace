@@ -21,6 +21,7 @@ import type { Audience } from "../shared/audience";
 import { Composer, Discussion } from "./Discussion";
 import { usePrDetail } from "./useThreadPr";
 import { usePrChecks } from "./Checks";
+import { MenuItem, Popover } from "./Popover";
 import { fileGroup, type FileGroup } from "../diff";
 import { PrDiffView } from "./PrDiffView";
 import { ReviewBar } from "./ReviewBar";
@@ -253,12 +254,13 @@ function PrSidebar({
 }) {
   const merge = MERGE_STATE[pr.mergeStateStatus] ?? MERGE_STATE.UNKNOWN!;
   const open = pr.state === "OPEN";
+  const linkedThreads = useLinkedThreads(pr.headRefName);
+  const agentThreadId = threadId ?? linkedThreads[0]?.id ?? null;
   return (
     <div className="space-y-7">
       <SideBlock title="Status">
         <div className="flex flex-wrap items-center gap-2">
-          <PrStateIcon pr={pr} />
-          <span>{STATE_LABEL[prState(pr)]}</span>
+          <StatusMenu pr={pr} rpc={rpc} onChanged={onChanged} />
           {open && merge.chip ? (
             <span className={cn("rounded-md bg-muted/50 px-2 py-0.5 text-xs", TONE_CLASS[merge.tone])}>{merge.chip}</span>
           ) : null}
@@ -267,13 +269,10 @@ function PrSidebar({
       </SideBlock>
       {threadId === null ? <LinkedThreads branch={pr.headRefName} /> : null}
       <SidebarReviewers pr={pr} rpc={rpc} onChanged={onChanged} />
-      <SidebarChecks state={checks} />
+      <SidebarChecks state={checks} pr={pr} rpc={rpc} agentThreadId={agentThreadId} />
       {open ? (
         <SideBlock title="Branch">
-          <div className={cn("flex items-center gap-2", TONE_CLASS[merge.tone])}>
-            <Icon name="GitPullRequest" className="size-4 shrink-0" />
-            <span className={merge.tone === "muted" ? "text-muted-foreground" : "text-foreground"}>{merge.branch}</span>
-          </div>
+          <BranchMenu pr={pr} rpc={rpc} onChanged={onChanged} merge={merge} />
         </SideBlock>
       ) : null}
       <SidebarFiles pr={pr} onOpenFile={onOpenFile} />
@@ -393,19 +392,149 @@ function SidebarReviewers({ pr, rpc, onChanged }: { pr: PrDetail; rpc: Rpc; onCh
   );
 }
 
-function SidebarChecks({ state }: { state: ReturnType<typeof usePrChecks> }) {
-  const list = state.checks?.checks ?? [];
-  if (state.checks === null) {
-    return (
-      <SideBlock title="Checks">
-        <p className="text-muted-foreground">{state.error ?? "Loading…"}</p>
-      </SideBlock>
+function useAction(onDone?: () => Promise<void> | void) {
+  const [pending, setPending] = useState(false);
+  const run = (promise: Promise<unknown>, message: string) => {
+    setPending(true);
+    promise.then(
+      async () => {
+        toast.success(message);
+        setPending(false);
+        await onDone?.();
+      },
+      (cause) => {
+        toast.error(errorText(cause));
+        setPending(false);
+      },
     );
-  }
-  if (list.length === 0) {
+  };
+  return { pending, run };
+}
+
+const TRIGGER_CLASS = "inline-flex max-w-full items-center gap-2 rounded-lg px-2 py-1 -mx-2 text-left hover:bg-accent/60 disabled:opacity-60";
+
+function StatusMenu({ pr, rpc, onChanged }: { pr: PrDetail; rpc: Rpc; onChanged: () => Promise<void> }) {
+  const { pending, run } = useAction(onChanged);
+  const current = prState(pr);
+  const label = (
+    <>
+      <PrStateIcon pr={pr} />
+      <span>{STATE_LABEL[current]}</span>
+    </>
+  );
+  // A merged PR is final.
+  if (current === "merged") return <span className="inline-flex items-center gap-2">{label}</span>;
+  const options = [
+    { id: "draft" as const, glyph: { state: "OPEN" as const, isDraft: true }, label: "Draft", message: "Converted to draft" },
+    { id: "open" as const, glyph: { state: "OPEN" as const, isDraft: false }, label: current === "closed" ? "Reopen" : "Open", message: current === "closed" ? "Reopened" : "Ready for review" },
+    { id: "closed" as const, glyph: { state: "CLOSED" as const, isDraft: false }, label: "Closed", message: "Closed" },
+  ];
+  return (
+    <Popover
+      className="w-48"
+      trigger={({ toggle }) => (
+        <button type="button" onClick={toggle} disabled={pending} aria-haspopup="menu" className={TRIGGER_CLASS}>
+          {label}
+          <Icon name="ChevronRight" className="size-3 rotate-90 text-muted-foreground" />
+        </button>
+      )}
+    >
+      {(close) =>
+        options.map((option) => (
+          <MenuItem
+            key={option.id}
+            checked={option.id === current}
+            onSelect={() => {
+              close();
+              if (option.id !== current) run(rpc.call("pr_set_state", { key: pr.key, state: option.id }), option.message);
+            }}
+          >
+            <PrStateIcon pr={option.glyph} />
+            {option.label}
+          </MenuItem>
+        ))
+      }
+    </Popover>
+  );
+}
+
+function BranchMenu({
+  pr,
+  rpc,
+  onChanged,
+  merge,
+}: {
+  pr: PrDetail;
+  rpc: Rpc;
+  onChanged: () => Promise<void>;
+  merge: { branch: string; tone: keyof typeof TONE_CLASS };
+}) {
+  const { pending, run } = useAction(onChanged);
+  const label = (
+    <>
+      <Icon name="GitPullRequest" className={cn("size-4 shrink-0", TONE_CLASS[merge.tone])} />
+      <span className={merge.tone === "muted" ? "text-muted-foreground" : "text-foreground"}>{pending ? "Updating…" : merge.branch}</span>
+    </>
+  );
+  // GitHub only offers an update when the branch is behind its base.
+  if (pr.mergeStateStatus !== "BEHIND") return <div className="flex items-center gap-2">{label}</div>;
+  const update = (method: "REBASE" | "MERGE") =>
+    run(rpc.call("pr_update_branch", { key: pr.key, method }), method === "REBASE" ? "Branch rebased on the base" : "Base merged into the branch");
+  return (
+    <Popover
+      className="w-56"
+      trigger={({ toggle }) => (
+        <button type="button" onClick={toggle} disabled={pending} aria-haspopup="menu" className={TRIGGER_CLASS}>
+          {label}
+        </button>
+      )}
+    >
+      {(close) => (
+        <>
+          <MenuItem onSelect={() => (close(), update("REBASE"))}>Update with rebase</MenuItem>
+          <MenuItem onSelect={() => (close(), update("MERGE"))}>Update with merge commit</MenuItem>
+        </>
+      )}
+    </Popover>
+  );
+}
+
+const CHECK_ORDER = ["failure", "cancelled", "running", "queued", "neutral", "skipped", "success"];
+
+function checkDuration(check: { startedAt: string | null; completedAt: string | null }): string | null {
+  if (!check.startedAt || !check.completedAt) return null;
+  const seconds = Math.max(0, Math.round((Date.parse(check.completedAt) - Date.parse(check.startedAt)) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return seconds % 60 === 0 ? `${minutes}m` : `${minutes}m ${seconds % 60}s`;
+}
+
+function CheckStateIcon({ state }: { state: string }) {
+  if (state === "success") return <Icon name="Check" aria-label="Passed" className="size-4 shrink-0 text-emerald-500" />;
+  if (state === "failure" || state === "cancelled") return <Icon name="X" aria-label="Failed" className="size-4 shrink-0 text-destructive" />;
+  if (state === "running" || state === "queued")
+    return <span aria-label="Running" className="mx-1 size-2 shrink-0 animate-pulse rounded-full bg-amber-500" />;
+  return <span aria-label="Skipped" className="mx-1 h-0.5 w-2 shrink-0 bg-muted-foreground" />;
+}
+
+function SidebarChecks({
+  state,
+  pr,
+  rpc,
+  agentThreadId,
+}: {
+  state: ReturnType<typeof usePrChecks>;
+  pr: PrDetail;
+  rpc: Rpc;
+  agentThreadId: string | null;
+}) {
+  const [filter, setFilter] = useState("");
+  const { pending, run } = useAction();
+  const list = state.checks?.checks ?? [];
+  if (state.checks === null || list.length === 0) {
     return (
       <SideBlock title="Checks">
-        <p className="text-muted-foreground">No checks on this commit</p>
+        <p className="text-muted-foreground">{state.checks === null ? (state.error ?? "Loading…") : "No checks on this commit"}</p>
       </SideBlock>
     );
   }
@@ -413,19 +542,78 @@ function SidebarChecks({ state }: { state: ReturnType<typeof usePrChecks> }) {
   const failing = list.filter((check) => check.state === "failure" || check.state === "cancelled");
   const running = list.filter((check) => check.state === "running" || check.state === "queued");
   const tone = failing.length > 0 ? "text-destructive" : running.length > 0 ? "text-amber-500" : "text-emerald-500";
+  const needle = filter.trim().toLowerCase();
+  const sorted = [...list]
+    .filter((check) => needle === "" || `${check.workflow ?? ""} ${check.name}`.toLowerCase().includes(needle))
+    .sort((a, b) => CHECK_ORDER.indexOf(a.state) - CHECK_ORDER.indexOf(b.state) || `${a.workflow}${a.name}`.localeCompare(`${b.workflow}${b.name}`));
+
   return (
     <SideBlock title="Checks">
-      <div className="flex items-center gap-2">
-        <Icon name="CircleCheck" className={cn("size-4", tone)} />
-        <span>
-          {passed} / {list.length} passed
-        </span>
-        {running.length > 0 ? <span className="text-xs text-muted-foreground">· {running.length} running</span> : null}
-      </div>
+      <Popover
+        align="end"
+        className="w-[min(32rem,85vw)] p-0"
+        trigger={({ toggle }) => (
+          <button type="button" onClick={toggle} aria-haspopup="menu" className={TRIGGER_CLASS}>
+            <Icon name="CircleCheck" className={cn("size-4", tone)} />
+            <span>
+              {passed} / {list.length} passed
+            </span>
+            {running.length > 0 ? <span className="text-xs text-muted-foreground">· {running.length} running</span> : null}
+          </button>
+        )}
+      >
+        {(close) => (
+          <div className="flex max-h-[70vh] flex-col">
+            <input
+              autoFocus
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder="Filter pull request checks…"
+              aria-label="Filter checks"
+              className="border-b border-border bg-transparent px-4 py-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none"
+            />
+            {failing.length > 0 ? (
+              <div className="border-b border-border p-1">
+                <MenuItem
+                  disabled={agentThreadId === null || pending}
+                  onSelect={() => {
+                    close();
+                    run(rpc.call("checks_to_agent", { threadId: agentThreadId!, key: pr.key }), "Failing checks queued on the thread");
+                  }}
+                >
+                  <Icon name="ArrowUpRight" className="size-4" />
+                  Resolve with agent
+                  {agentThreadId === null ? <span className="text-xs text-muted-foreground">(no thread on this branch)</span> : null}
+                </MenuItem>
+              </div>
+            ) : null}
+            <div className="overflow-y-auto p-1">
+              {sorted.length === 0 ? <p className="px-3 py-2 text-sm text-muted-foreground">No check matches.</p> : null}
+              {sorted.map((check) => (
+                <UrlLink
+                  key={check.id}
+                  href={check.url ?? pr.url + "/checks"}
+                  target="_blank"
+                  className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-foreground no-underline hover:bg-accent"
+                >
+                  <CheckStateIcon state={check.state} />
+                  <span className="min-w-0 flex-1 truncate">
+                    {check.workflow ? <span className="text-muted-foreground">{check.workflow} / </span> : null}
+                    {check.name}
+                  </span>
+                  <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                    {check.state === "running" ? "running" : check.state === "queued" ? "queued" : checkDuration(check)}
+                  </span>
+                </UrlLink>
+              ))}
+            </div>
+          </div>
+        )}
+      </Popover>
       {[...failing, ...running].slice(0, 6).map((check) => (
         <UrlLink
           key={check.id}
-          href={check.url ?? "#"}
+          href={check.url ?? pr.url + "/checks"}
           target="_blank"
           className="flex items-center gap-2 text-foreground no-underline hover:underline"
         >
