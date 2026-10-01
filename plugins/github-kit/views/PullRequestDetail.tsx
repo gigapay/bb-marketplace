@@ -20,11 +20,12 @@ import type { rpcContract } from "../server";
 import type { Audience } from "../shared/audience";
 import { Composer, Discussion } from "./Discussion";
 import { usePrDetail } from "./useThreadPr";
-import { ChecksSection, usePrChecks } from "./Checks";
+import { usePrChecks } from "./Checks";
+import { fileGroup, type FileGroup } from "../diff";
 import { PrDiffView } from "./PrDiffView";
 import { ReviewBar } from "./ReviewBar";
 import { readUi, writeUi } from "./uiState";
-import { ChecksIcon, EmptyState, ErrorLine, LabelChip, PrStateIcon, ReviewChip, errorText, relativeTime, useDebounced } from "./shared";
+import { EmptyState, ErrorLine, LabelChip, PrStateIcon, ReviewChip, errorText, prState, relativeTime, useDebounced } from "./shared";
 
 type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
 
@@ -41,7 +42,6 @@ export function PullRequestDetail({
   const rpc = useRpc<typeof rpcContract>();
   // Shared with the diff view, so resolving here updates it too.
   const { detail: pr, error, loading, refresh } = usePrDetail(prKey);
-  const load = () => void refresh();
   const checks = usePrChecks(prKey);
   // Remembered per PR, so coming back reopens the same tab.
   const [tab, setTabState] = useState<"overview" | "diff">(() =>
@@ -51,6 +51,12 @@ export function PullRequestDetail({
     setTabState(next);
     writeUi(`tab.${prKey}`, next);
   };
+  // "Files changed" in the overview jumps to a file in the diff: the diff
+  // restores the remembered file when it mounts.
+  const openFile = (path: string) => {
+    writeUi(`file.${prKey}`, path);
+    setTab("diff");
+  };
   // A new push changes the head commit: reload so comments and diff stats follow.
   const headSha = checks.checks?.headSha ?? null;
   const seenSha = useRef<string | null>(null);
@@ -59,55 +65,77 @@ export function PullRequestDetail({
     if (seenSha.current !== null && seenSha.current !== headSha) void refresh();
     seenSha.current = headSha;
   }, [headSha, refresh]);
+  // The thread side panel is narrow: the sidebar stacks under the title there.
+  const narrow = threadId !== null;
 
   return (
     // The page gives a PR the full width; only the diff keeps it, the overview
     // stays in the usual centered container.
-    <div className={cn("mx-auto space-y-5", tab === "diff" ? "max-w-none" : "max-w-5xl")}>
-      {onBack ? (
-        <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
-          <Icon name="ChevronLeft" className="size-4" />
-          Pull requests
-        </Button>
-      ) : null}
+    <div className={cn("mx-auto space-y-5", tab === "diff" ? "max-w-none" : "max-w-6xl")}>
+      <div className="flex flex-wrap items-center gap-2">
+        {onBack ? (
+          <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mr-1">
+            <Icon name="ChevronLeft" className="size-4" />
+            Pull requests
+          </Button>
+        ) : null}
+        <div role="tablist" aria-label="Pull request view" className="flex items-center gap-1.5">
+          {(["overview", "diff"] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => setTab(id)}
+              className={cn(
+                "rounded-full border px-3.5 py-1 text-sm transition-colors",
+                tab === id
+                  ? "border-border bg-accent text-accent-foreground"
+                  : "border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {id === "overview" ? "Overview" : pr ? `Diff · ${pr.changedFiles}` : "Diff"}
+            </button>
+          ))}
+        </div>
+        <span className="flex-1" />
+        {pr ? (
+          <>
+            <Button variant="ghost" size="icon" aria-label="Refresh" onClick={() => void refresh()} disabled={loading}>
+              <Icon name="ArrowReloadHorizontal" className={cn("size-4", loading && "animate-spin")} />
+            </Button>
+            <Button variant="ghost" size="icon" aria-label="Copy link" onClick={() => copyLink(pr.url)}>
+              <Icon name="Copy" className="size-4" />
+            </Button>
+            <UrlLink href={pr.url} target="_blank" aria-label="Open on GitHub" className="inline-flex size-9 items-center justify-center text-muted-foreground hover:text-foreground">
+              <Icon name="ExternalLink" className="size-4" />
+            </UrlLink>
+          </>
+        ) : null}
+      </div>
       <ErrorLine error={error} />
       {pr === null ? (
         error === null ? <EmptyState>Loading {prKey}…</EmptyState> : null
       ) : (
         <>
-          <Header pr={pr} liveChecks={checks.checks?.rollup} loading={loading} onRefresh={load} />
-          <div role="tablist" aria-label="Pull request view" className="flex w-fit rounded-md border border-border p-0.5">
-            {(["overview", "diff"] as const).map((id) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={tab === id}
-                onClick={() => setTab(id)}
-                className={cn(
-                  "rounded px-3 py-1 text-sm transition-colors",
-                  tab === id ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {id === "overview" ? "Overview" : `Diff · ${pr.changedFiles} files`}
-              </button>
-            ))}
-          </div>
           {tab === "diff" ? (
-            <PrDiffView pr={pr} threadId={threadId} onChanged={refresh} compact={threadId !== null} />
+            <>
+              <TitleBlock pr={pr} compact />
+              <PrDiffView pr={pr} threadId={threadId} onChanged={refresh} compact={narrow} />
+            </>
           ) : (
-            <div className="space-y-5">
-              {threadId === null ? <LinkedThreads branch={pr.headRefName} /> : null}
-              <ChecksSection state={checks} />
-              <Reviewers pr={pr} rpc={rpc} onChanged={load} />
-              <Section title="Description">
-                {pr.body.trim() === "" ? (
-                  <p className="text-sm text-muted-foreground">No description.</p>
-                ) : (
-                  <Markdown content={pr.body} className="text-sm" />
-                )}
-              </Section>
-              <Comments pr={pr} rpc={rpc} threadId={threadId} onChanged={refresh} />
+            <div className={cn("grid gap-x-12 gap-y-8", !narrow && "lg:grid-cols-[minmax(0,1fr)_17rem]")}>
+              <div className="min-w-0 space-y-8">
+                <TitleBlock pr={pr} compact={false} />
+                {narrow ? <PrSidebar pr={pr} rpc={rpc} checks={checks} threadId={threadId} onChanged={refresh} onOpenFile={openFile} /> : null}
+                <DescriptionBlock pr={pr} />
+                <Comments pr={pr} rpc={rpc} threadId={threadId} onChanged={refresh} />
+              </div>
+              {narrow ? null : (
+                <aside className="lg:sticky lg:top-0 lg:self-start">
+                  <PrSidebar pr={pr} rpc={rpc} checks={checks} threadId={threadId} onChanged={refresh} onOpenFile={openFile} />
+                </aside>
+              )}
             </div>
           )}
           <ReviewBar pr={pr} onSubmitted={refresh} />
@@ -124,65 +152,131 @@ function copyLink(url: string) {
   );
 }
 
-function Section({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
-  return (
-    <section>
-      <div className="mb-2 flex min-h-8 items-center gap-2">
-        <h3 className="flex-1 text-sm font-medium">{title}</h3>
-        {actions}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function Header({
-  pr,
-  liveChecks,
-  loading,
-  onRefresh,
-}: {
-  pr: PrDetail;
-  liveChecks: PrDetail["checks"] | undefined;
-  loading: boolean;
-  onRefresh: () => void;
-}) {
+function TitleBlock({ pr, compact }: { pr: PrDetail; compact: boolean }) {
   return (
     <div className="space-y-2">
-      <div className="flex items-start gap-2">
-        <span className="mt-1">
-          <PrStateIcon pr={pr} />
+      <h1 className={cn("font-semibold leading-tight tracking-tight", compact ? "text-lg" : "text-2xl md:text-[1.7rem]")}>
+        {pr.title} <span className="font-normal text-muted-foreground">#{pr.number}</span>
+      </h1>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+        {pr.author ? (
+          <span className="inline-flex items-center gap-1.5 text-foreground">
+            <img src={pr.author.avatarUrl} alt="" className="size-5 rounded-full" />
+            {pr.author.login}
+          </span>
+        ) : null}
+        <span aria-hidden>·</span>
+        <span className="min-w-0 truncate font-mono text-xs">
+          {pr.baseRefName} ← {pr.headRefName}
         </span>
-        <h2 className="min-w-0 flex-1 text-lg font-semibold leading-snug">
-          {pr.title} <span className="font-normal text-muted-foreground">#{pr.number}</span>
-        </h2>
-        <Button variant="ghost" size="icon" aria-label="Refresh" onClick={onRefresh} disabled={loading}>
-          <Icon name="ArrowReloadHorizontal" className={cn("size-4", loading && "animate-spin")} />
-        </Button>
-        <Button variant="ghost" size="icon" aria-label="Copy link" onClick={() => copyLink(pr.url)}>
-          <Icon name="Copy" className="size-4" />
-        </Button>
-        <UrlLink href={pr.url} target="_blank" aria-label="Open on GitHub" className="mt-2 text-muted-foreground hover:text-foreground">
-          <Icon name="ExternalLink" className="size-4" />
-        </UrlLink>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
-        <span>{pr.repository}</span>
-        <span className="font-mono">
-          {pr.headRefName} → {pr.baseRefName}
-        </span>
-        {pr.author ? <span>by {pr.author.login}</span> : null}
-        <span>updated {relativeTime(pr.updatedAt)}</span>
-        <span className="font-mono">
-          <span className="text-[#1f883d]">+{pr.additions}</span> <span className="text-destructive">−{pr.deletions}</span> ·{" "}
-          {pr.changedFiles} files
-        </span>
-        <ChecksIcon checks={liveChecks === undefined ? pr.checks : liveChecks} />
-        <ReviewChip decision={pr.reviewDecision} />
+        <span aria-hidden>·</span>
+        <span className="text-xs">{pr.repository}</span>
         {pr.labels.map((label) => (
           <LabelChip key={label.name} name={label.name} color={label.color} />
         ))}
       </div>
+    </div>
+  );
+}
+
+function DescriptionBlock({ pr }: { pr: PrDetail }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+      >
+        Description
+        <Icon name="ChevronRight" className={cn("size-3 transition-transform", open && "rotate-90")} />
+      </button>
+      {open ? (
+        pr.body.trim() === "" ? (
+          <p className="text-sm text-muted-foreground">No description.</p>
+        ) : (
+          <Markdown content={pr.body} className="text-[15px] leading-relaxed" />
+        )
+      ) : null}
+    </section>
+  );
+}
+
+/** One block of the right column: a muted label, an optional action, content. */
+function SideBlock({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <span className="flex-1">{title}</span>
+        {action}
+      </div>
+      <div className="space-y-1.5 text-sm">{children}</div>
+    </section>
+  );
+}
+
+const MERGE_STATE: Record<string, { chip: string | null; branch: string; tone: "ok" | "warn" | "bad" | "muted" }> = {
+  BEHIND: { chip: "Branch behind", branch: "Behind base, update required", tone: "warn" },
+  DIRTY: { chip: "Conflicts", branch: "Has conflicts with the base branch", tone: "bad" },
+  BLOCKED: { chip: "Blocked", branch: "Up to date, merging is blocked", tone: "muted" },
+  UNSTABLE: { chip: "Checks failing", branch: "Up to date with the base branch", tone: "warn" },
+  CLEAN: { chip: "Ready to merge", branch: "Up to date with the base branch", tone: "ok" },
+  HAS_HOOKS: { chip: null, branch: "Up to date with the base branch", tone: "ok" },
+  DRAFT: { chip: null, branch: "Draft, not mergeable yet", tone: "muted" },
+  UNKNOWN: { chip: null, branch: "GitHub is still checking mergeability", tone: "muted" },
+};
+
+const TONE_CLASS = {
+  ok: "text-emerald-500",
+  warn: "text-amber-500",
+  bad: "text-destructive",
+  muted: "text-muted-foreground",
+} as const;
+
+const STATE_LABEL = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" } as const;
+
+function PrSidebar({
+  pr,
+  rpc,
+  checks,
+  threadId,
+  onChanged,
+  onOpenFile,
+}: {
+  pr: PrDetail;
+  rpc: Rpc;
+  checks: ReturnType<typeof usePrChecks>;
+  threadId: string | null;
+  onChanged: () => Promise<void>;
+  onOpenFile: (path: string) => void;
+}) {
+  const merge = MERGE_STATE[pr.mergeStateStatus] ?? MERGE_STATE.UNKNOWN!;
+  const open = pr.state === "OPEN";
+  return (
+    <div className="space-y-7">
+      <SideBlock title="Status">
+        <div className="flex flex-wrap items-center gap-2">
+          <PrStateIcon pr={pr} />
+          <span>{STATE_LABEL[prState(pr)]}</span>
+          {open && merge.chip ? (
+            <span className={cn("rounded-md bg-muted/50 px-2 py-0.5 text-xs", TONE_CLASS[merge.tone])}>{merge.chip}</span>
+          ) : null}
+          {pr.reviewDecision ? <ReviewChip decision={pr.reviewDecision} /> : null}
+        </div>
+      </SideBlock>
+      {threadId === null ? <LinkedThreads branch={pr.headRefName} /> : null}
+      <SidebarReviewers pr={pr} rpc={rpc} onChanged={onChanged} />
+      <SidebarChecks state={checks} />
+      {open ? (
+        <SideBlock title="Branch">
+          <div className={cn("flex items-center gap-2", TONE_CLASS[merge.tone])}>
+            <Icon name="GitPullRequest" className="size-4 shrink-0" />
+            <span className={merge.tone === "muted" ? "text-muted-foreground" : "text-foreground"}>{merge.branch}</span>
+          </div>
+        </SideBlock>
+      ) : null}
+      <SidebarFiles pr={pr} onOpenFile={onOpenFile} />
     </div>
   );
 }
@@ -201,47 +295,43 @@ function LinkedThreads({ branch }: { branch: string }) {
   const navigate = useBbNavigate();
   if (threads.length === 0) return null;
   return (
-    <Section title="Threads on this branch">
-      <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
-        {threads.map((thread) => (
-          <li key={thread.id}>
-            <button
-              type="button"
-              onClick={() => navigate.toThread(thread.id)}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent/50"
-            >
-              <Icon name="MessageSquare" className="size-4 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate">{thread.displayTitle}</span>
-              <span className="text-xs text-muted-foreground">{thread.status}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </Section>
+    <SideBlock title="Threads">
+      {threads.map((thread) => (
+        <button
+          key={thread.id}
+          type="button"
+          onClick={() => navigate.toThread(thread.id)}
+          className="flex w-full items-center gap-2 rounded text-left hover:text-foreground"
+        >
+          <Icon name="MessageSquare" className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate">{thread.displayTitle}</span>
+        </button>
+      ))}
+    </SideBlock>
   );
 }
 
-const REVIEWER_STATE_LABEL: Record<Reviewer["state"], string> = {
-  REQUESTED: "Requested",
-  APPROVED: "Approved",
-  CHANGES_REQUESTED: "Changes requested",
-  COMMENTED: "Commented",
-  DISMISSED: "Dismissed",
-  PENDING: "Pending",
+const REVIEWER_STATE: Record<Reviewer["state"], { label: string; className: string; icon: string }> = {
+  REQUESTED: { label: "Review requested", className: "text-amber-500", icon: "Clock" },
+  APPROVED: { label: "Approved", className: "text-emerald-500", icon: "Check" },
+  CHANGES_REQUESTED: { label: "Changes requested", className: "text-destructive", icon: "X" },
+  COMMENTED: { label: "Commented", className: "text-muted-foreground", icon: "MessageSquare" },
+  DISMISSED: { label: "Dismissed", className: "text-muted-foreground", icon: "X" },
+  PENDING: { label: "Pending", className: "text-muted-foreground", icon: "Clock" },
 };
 
-function Reviewers({ pr, rpc, onChanged }: { pr: PrDetail; rpc: Rpc; onChanged: () => void }) {
+function SidebarReviewers({ pr, rpc, onChanged }: { pr: PrDetail; rpc: Rpc; onChanged: () => Promise<void> }) {
   const [adding, setAdding] = useState(false);
   const [pending, setPending] = useState(false);
 
   const update = (add: string[], remove: string[], message: string) => {
     setPending(true);
     rpc.call("reviewers_update", { key: pr.key, add, remove }).then(
-      () => {
+      async () => {
         toast.success(message);
         setPending(false);
         setAdding(false);
-        onChanged();
+        await onChanged();
       },
       (cause) => {
         toast.error(errorText(cause));
@@ -251,14 +341,19 @@ function Reviewers({ pr, rpc, onChanged }: { pr: PrDetail; rpc: Rpc; onChanged: 
   };
 
   return (
-    <Section
+    <SideBlock
       title="Reviewers"
-      actions={
+      action={
         pr.state === "OPEN" ? (
-          <Button size="sm" variant="outline" onClick={() => setAdding((value) => !value)} disabled={pending}>
+          <button
+            type="button"
+            aria-label="Request a review"
+            onClick={() => setAdding((value) => !value)}
+            disabled={pending}
+            className="text-muted-foreground hover:text-foreground"
+          >
             <Icon name="Plus" className="size-4" />
-            Request review
-          </Button>
+          </button>
         ) : null
       }
     >
@@ -270,34 +365,135 @@ function Reviewers({ pr, rpc, onChanged }: { pr: PrDetail; rpc: Rpc; onChanged: 
           onClose={() => setAdding(false)}
         />
       ) : null}
-      {pr.reviewers.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No reviewers yet.</p>
-      ) : (
-        <ul className="flex flex-wrap gap-2">
-          {pr.reviewers.map((reviewer) => (
-            <li
-              key={`${reviewer.isTeam ? "team:" : ""}${reviewer.login}`}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border py-0.5 pl-1 pr-2 text-xs"
-            >
-              {reviewer.avatarUrl ? <img src={reviewer.avatarUrl} alt="" className="size-5 rounded-full" /> : null}
-              <span className="font-medium">{reviewer.isTeam ? `@${reviewer.login}` : reviewer.login}</span>
-              <span className="text-muted-foreground">{REVIEWER_STATE_LABEL[reviewer.state]}</span>
-              {reviewer.state === "REQUESTED" && !reviewer.isTeam && pr.state === "OPEN" ? (
-                <button
-                  type="button"
-                  aria-label={`Remove ${reviewer.login}`}
-                  disabled={pending}
-                  onClick={() => update([], [reviewer.login], `Removed ${reviewer.login}`)}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <Icon name="X" className="size-3" />
-                </button>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
-    </Section>
+      {pr.reviewers.length === 0 ? <p className="text-muted-foreground">No reviewers</p> : null}
+      {pr.reviewers.map((reviewer) => {
+        const state = REVIEWER_STATE[reviewer.state];
+        return (
+          <div key={`${reviewer.isTeam ? "team:" : ""}${reviewer.login}`} className="group flex items-center gap-2">
+            {reviewer.avatarUrl ? <img src={reviewer.avatarUrl} alt="" className="size-5 rounded-full" /> : <span className="size-5" />}
+            <span className="min-w-0 flex-1 truncate">{reviewer.isTeam ? `@${reviewer.login}` : reviewer.login}</span>
+            {reviewer.state === "REQUESTED" && !reviewer.isTeam && pr.state === "OPEN" ? (
+              <button
+                type="button"
+                aria-label={`Remove ${reviewer.login}`}
+                disabled={pending}
+                onClick={() => update([], [reviewer.login], `Removed ${reviewer.login}`)}
+                className="hidden text-muted-foreground hover:text-foreground group-hover:inline-flex"
+              >
+                <Icon name="X" className="size-3.5" />
+              </button>
+            ) : null}
+            <span title={state.label} className={cn("inline-flex", state.className)}>
+              <Icon name={state.icon} aria-label={state.label} className="size-3.5" />
+            </span>
+          </div>
+        );
+      })}
+    </SideBlock>
+  );
+}
+
+function SidebarChecks({ state }: { state: ReturnType<typeof usePrChecks> }) {
+  const list = state.checks?.checks ?? [];
+  if (state.checks === null) {
+    return (
+      <SideBlock title="Checks">
+        <p className="text-muted-foreground">{state.error ?? "Loading…"}</p>
+      </SideBlock>
+    );
+  }
+  if (list.length === 0) {
+    return (
+      <SideBlock title="Checks">
+        <p className="text-muted-foreground">No checks on this commit</p>
+      </SideBlock>
+    );
+  }
+  const passed = list.filter((check) => check.state === "success" || check.state === "skipped" || check.state === "neutral").length;
+  const failing = list.filter((check) => check.state === "failure" || check.state === "cancelled");
+  const running = list.filter((check) => check.state === "running" || check.state === "queued");
+  const tone = failing.length > 0 ? "text-destructive" : running.length > 0 ? "text-amber-500" : "text-emerald-500";
+  return (
+    <SideBlock title="Checks">
+      <div className="flex items-center gap-2">
+        <Icon name="CircleCheck" className={cn("size-4", tone)} />
+        <span>
+          {passed} / {list.length} passed
+        </span>
+        {running.length > 0 ? <span className="text-xs text-muted-foreground">· {running.length} running</span> : null}
+      </div>
+      {[...failing, ...running].slice(0, 6).map((check) => (
+        <UrlLink
+          key={check.id}
+          href={check.url ?? "#"}
+          target="_blank"
+          className="flex items-center gap-2 text-foreground no-underline hover:underline"
+        >
+          <span
+            aria-hidden
+            className={cn(
+              "mx-1 size-2 shrink-0 rounded-full",
+              check.state === "failure" || check.state === "cancelled" ? "bg-destructive" : "animate-pulse bg-amber-500",
+            )}
+          />
+          <span className="min-w-0 truncate">{check.name}</span>
+        </UrlLink>
+      ))}
+    </SideBlock>
+  );
+}
+
+function SidebarFiles({ pr, onOpenFile }: { pr: PrDetail; onOpenFile: (path: string) => void }) {
+  const [collapsed, setCollapsed] = useState<ReadonlySet<FileGroup>>(new Set(["Tests", "Documentation"]));
+  const groups = (["Implementation", "Tests", "Documentation"] as const)
+    .map((group) => ({ group, files: pr.files.filter((file) => fileGroup(file.path) === group) }))
+    .filter((entry) => entry.files.length > 0);
+  const toggle = (group: FileGroup) =>
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  return (
+    <SideBlock title={`${pr.changedFiles} ${pr.changedFiles === 1 ? "file" : "files"} changed`}>
+      {groups.map(({ group, files }) => {
+        const additions = files.reduce((sum, file) => sum + file.additions, 0);
+        const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
+        const isOpen = !collapsed.has(group);
+        return (
+          <div key={group}>
+            <button type="button" onClick={() => toggle(group)} aria-expanded={isOpen} className="flex w-full items-center gap-1.5 text-left">
+              <span>{group}</span>
+              <span className="text-muted-foreground">{files.length}</span>
+              <Icon name="ChevronRight" className={cn("size-3 text-muted-foreground transition-transform", isOpen && "rotate-90")} />
+              <span className="ml-auto font-mono text-xs">
+                {additions > 0 ? <span className="text-[#3fb950]">+{additions}</span> : null}{" "}
+                {deletions > 0 ? <span className="text-destructive">-{deletions}</span> : null}
+              </span>
+            </button>
+            {isOpen ? (
+              <ul className="ml-1.5 mt-1 space-y-1 border-l border-border pl-3">
+                {files.map((file) => {
+                  const slash = file.path.lastIndexOf("/");
+                  return (
+                    <li key={file.path}>
+                      <button type="button" onClick={() => onOpenFile(file.path)} title={file.path} className="flex w-full min-w-0 items-baseline gap-1.5 text-left hover:underline">
+                        <span className="shrink-0 truncate">{file.path.slice(slash + 1)}</span>
+                        <span className="min-w-0 truncate text-xs text-muted-foreground/70">{slash === -1 ? "" : file.path.slice(0, slash)}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
+        );
+      })}
+      {pr.files.length < pr.changedFiles ? (
+        <p className="text-xs text-muted-foreground">Showing the first {pr.files.length}; the Diff tab has them all.</p>
+      ) : null}
+    </SideBlock>
   );
 }
 
@@ -452,35 +648,41 @@ function Comments({
   };
 
   return (
-    <Section
-      title="Comments"
-      actions={
-        open.length > 0 ? (
-          <Button size="sm" variant="ghost" onClick={queueVisible}>
-            Queue all shown
+    <section>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <h3 className="text-xs text-muted-foreground">Activity</h3>
+        <span className="flex-1" />
+        <div role="tablist" aria-label="Comment authors" className="flex items-center gap-1">
+          {AUDIENCES.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={audience === item.id}
+              onClick={() => setAudience(item.id)}
+              className={cn(
+                "rounded-full px-2.5 py-0.5 text-xs transition-colors",
+                audience === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {item.label} <span className="opacity-70">{counts[item.id]}</span>
+            </button>
+          ))}
+        </div>
+        {open.length > 0 ? (
+          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={queueVisible}>
+            Queue all for the agent
           </Button>
-        ) : null
-      }
-    >
-      <div role="tablist" aria-label="Comment authors" className="mb-3 flex w-fit rounded-md border border-border p-0.5">
-        {AUDIENCES.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={audience === item.id}
-            onClick={() => setAudience(item.id)}
-            className={cn(
-              "rounded px-2.5 py-1 text-sm transition-colors",
-              audience === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {item.label} <span className="text-muted-foreground">{counts[item.id]}</span>
-          </button>
-        ))}
+        ) : null}
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-4">
+        <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
+          <span className="inline-flex text-emerald-500">
+            <PrStateIcon pr={{ state: "OPEN", isDraft: false }} />
+          </span>
+          Opened by {pr.author?.login ?? "ghost"} with {pr.commitCount} {pr.commitCount === 1 ? "commit" : "commits"} · {relativeTime(pr.createdAt)}
+        </p>
         {open.length === 0 && resolved.length === 0 ? (
           <EmptyState>
             {audience === "bots" ? "No bot comments." : audience === "humans" ? "No human comments." : "No comments yet."}
@@ -561,6 +763,6 @@ function Comments({
           />
         </div>
       ) : null}
-    </Section>
+    </section>
   );
 }

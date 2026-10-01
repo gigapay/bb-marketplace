@@ -62,6 +62,11 @@ export const prDetailSchema = z.object({
   additions: z.number(),
   deletions: z.number(),
   changedFiles: z.number(),
+  commitCount: z.number(),
+  // GitHub's merge state: BEHIND, DIRTY (conflicts), BLOCKED, CLEAN, UNKNOWN…
+  mergeStateStatus: z.string(),
+  // Light file list for the overview's "Files changed"; patches come from pr_diff.
+  files: z.array(z.object({ path: z.string(), additions: z.number(), deletions: z.number() })),
   headRefName: z.string(),
   baseRefName: z.string(),
   repository: z.string(),
@@ -84,7 +89,9 @@ export const PR_DETAIL_QUERY = `query PullRequest($owner: String!, $name: String
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       id number title url state isDraft body createdAt updatedAt
-      additions deletions changedFiles headRefName baseRefName reviewDecision
+      additions deletions changedFiles headRefName baseRefName reviewDecision mergeStateStatus
+      commitCount: commits { totalCount }
+      files(first: 100) { nodes { path additions deletions } }
       repository { nameWithOwner }
       ${ACTOR}
       labels(first: 20) { nodes { name color } }
@@ -120,6 +127,9 @@ export type RawPrDetail = {
   additions: number;
   deletions: number;
   changedFiles: number;
+  mergeStateStatus: string;
+  commitCount: { totalCount: number };
+  files: Nodes<{ path: string; additions: number; deletions: number }> | null;
   headRefName: string;
   baseRefName: string;
   reviewDecision: PrDetail["reviewDecision"];
@@ -232,6 +242,9 @@ export function normalizeDetail(raw: RawPrDetail, key: string, viewerLogin: stri
     additions: raw.additions,
     deletions: raw.deletions,
     changedFiles: raw.changedFiles,
+    commitCount: raw.commitCount.totalCount,
+    mergeStateStatus: raw.mergeStateStatus,
+    files: raw.files?.nodes ?? [],
     headRefName: raw.headRefName,
     baseRefName: raw.baseRefName,
     repository: raw.repository.nameWithOwner,
