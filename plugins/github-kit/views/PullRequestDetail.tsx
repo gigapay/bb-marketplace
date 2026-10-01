@@ -22,6 +22,7 @@ import { Composer, Discussion } from "./Discussion";
 import { usePrDetail } from "./useThreadPr";
 import { usePrChecks } from "./Checks";
 import { MenuItem, Popover } from "./Popover";
+import { MergeControl } from "./MergeControl";
 import { fileGroup, type FileGroup } from "../diff";
 import { PrDiffView } from "./PrDiffView";
 import { ReviewBar } from "./ReviewBar";
@@ -102,6 +103,7 @@ export function PullRequestDetail({
         <span className="flex-1" />
         {pr ? (
           <>
+            <MergeControl pr={pr} headSha={headSha} onChanged={refresh} />
             <Button variant="ghost" size="icon" aria-label="Refresh" onClick={() => void refresh()} disabled={loading}>
               <Icon name="ArrowReloadHorizontal" className={cn("size-4", loading && "animate-spin")} />
             </Button>
