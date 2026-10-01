@@ -116,7 +116,7 @@ A thread is linked to an issue when it was started from a ticket (issue page or 
 - `worktree/provider.ts` is the Linear worktree provider. `worktree/host` and `worktree/vendor` are the host-side git code copied from BB, and `host.ts` and `contract.ts` merge it with the branch rename into the plugin's single host entry.
 - `assets/linear.svg` is the Linear mark. It's the plugin icon, and `linear-issues/linear` everywhere in the UI.
 - `lib/prompt.ts` builds that seeded prompt. The description is wrapped as untrusted reference data.
-- `skills/linear/SKILL.md` is the `/linear` skill, which teaches agents the `bb linear` CLI. `bb linear-issues` stays as a deprecated alias, so prompts from before the rename keep working.
+- `skills/linear/SKILL.md` is the `/linear` skill, which teaches agents the `bb linear` CLI. It used to be `bb linear-issues`; BB allows one CLI command per plugin, so there's no alias.
 
 ## Develop
 

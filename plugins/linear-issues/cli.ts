@@ -412,8 +412,7 @@ export function registerCli(bb: BbPluginApi, deps: CliDeps) {
       return { exitCode: 1, stderr: USAGE };
     },
   };
+  // A plugin gets exactly one CLI command, so the old `bb linear-issues`
+  // name can't live on as an alias.
   bb.cli.register(cli);
-  // Threads started before the rename have `bb linear-issues …` in their
-  // prompts; keep that spelling working.
-  bb.cli.register({ ...cli, name: "linear-issues", summary: "Deprecated alias of `bb linear`" });
 }
