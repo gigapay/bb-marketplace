@@ -25,8 +25,10 @@ Then install from the Plugins page, or run `bb plugin install linear-issues@giga
 
 Each plugin is tagged on its own with `<plugin-id>/vX.Y.Z`. The catalog uses the range `>=0.1.0 <1.0.0` (a plain `^0.x` would lock the minor version), so a new tag reaches users without editing `marketplace.json`:
 
-1. Bump `version` in `plugins/<id>/package.json`.
-2. Commit, then tag with `git tag <id>/vX.Y.Z` and run `git push --follow-tags`.
+1. Bump `version` in `plugins/<id>/package.json` in your pull request.
+2. Merge it. The "Tag plugin releases" workflow (`.github/workflows/tag-releases.yml`) then tags `<id>/vX.Y.Z` on main for every plugin in `marketplace.json` whose version has no tag yet. On a pull request, its summary lists the tags merging would create.
+
+A change without a version bump is merged but not released. To tag by hand, `git tag <id>/vX.Y.Z` and `git push origin <id>/vX.Y.Z` still work; the workflow skips tags that already exist.
 
 Never move an existing tag. BB records the commit each tag pointed at and refuses the plugin if it changes. Ship a fix as a new version instead.
 

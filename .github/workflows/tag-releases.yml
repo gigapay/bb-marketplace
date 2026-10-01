@@ -1,0 +1,39 @@
+name: Tag plugin releases
+
+# On main, tag every plugin whose package.json version has no
+# `<id>/vX.Y.Z` tag yet, so `bb plugin update` picks it up. On pull requests,
+# only report which tags merging would create.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node .github/scripts/tag-releases.mjs --dry-run
+
+  tag:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Two quick merges must not race on the same tag.
+    concurrency:
+      group: tag-plugin-releases
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node .github/scripts/tag-releases.mjs
