@@ -9,7 +9,7 @@ import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { PR_SCOPES, buildPrSearch, type PrScope } from "./shared/search";
 import { PR_DETAIL_QUERY, actorSchema, normalizeDetail, prDetailSchema, type PrDetail, type RawPrDetail } from "./detail";
-import { parsePrKey, prKey, type PrRef } from "./shared/pr-ref";
+import { LINKS_CHANGED, parsePrKey, parsePrReference, prKey, type PrRef } from "./shared/pr-ref";
 import { PR_DIFF_META_QUERY, SHA_PATTERN, diffRangeSchema, prDiffSchema, toDiffFiles, type DiffFile, type PrDiff, type RawDiffMeta, type RestFile } from "./diff";
 import { PR_CHECKS_QUERY, normalizeChecks, prChecksSchema, type PrChecks, type RawPrChecks } from "./checks";
 import { buildCommentsPrompt } from "./shared/prompt";
@@ -160,6 +160,21 @@ export const rpcContract = defineRpcContract({
   },
   // Queues selected comments as one message on a thread. The server
   // re-reads the PR, so the prompt only ever carries GitHub's own text.
+  // Thread ↔ PR links. A stored link wins over the branch lookup; a stored
+  // null is an explicit unlink that hides it.
+  link_get: {
+    input: z.object({ threadId: threadIdSchema }).strict(),
+    output: z.object({ stored: z.boolean(), key: z.string().nullable() }),
+  },
+  link_set: {
+    input: z.object({ threadId: threadIdSchema, key: prKeySchema.nullable() }).strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
+  // Drops the stored row so the branch lookup applies again.
+  link_reset: {
+    input: z.object({ threadId: threadIdSchema }).strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
   comments_send: {
     input: z
       .object({
@@ -470,6 +485,69 @@ export default async function plugin(bb: BbPluginApi) {
     return { pullRequests, total: data.search.issueCount };
   }
 
+  const db = bb.storage.database();
+  bb.storage.migrate(db, [
+    `CREATE TABLE thread_pr_links (
+      thread_id TEXT PRIMARY KEY,
+      pr_key TEXT,
+      updated_at INTEGER NOT NULL
+    )`,
+  ]);
+  const selectLink = db.prepare(`SELECT pr_key AS key FROM thread_pr_links WHERE thread_id = ?`);
+  const upsertLink = db.prepare(
+    `INSERT INTO thread_pr_links (thread_id, pr_key, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT (thread_id) DO UPDATE SET pr_key = excluded.pr_key, updated_at = excluded.updated_at`,
+  );
+  const deleteLink = db.prepare(`DELETE FROM thread_pr_links WHERE thread_id = ?`);
+
+  function storedLink(threadId: string): { key: string | null } | undefined {
+    return selectLink.get(threadId) as { key: string | null } | undefined;
+  }
+  function storeLink(threadId: string, key: string | null) {
+    upsertLink.run(threadId, key, Date.now());
+    bb.realtime.publish(LINKS_CHANGED, { threadId });
+  }
+  function clearLink(threadId: string) {
+    deleteLink.run(threadId);
+    bb.realtime.publish(LINKS_CHANGED, { threadId });
+  }
+
+  async function prForBranch(branch: string): Promise<string | null> {
+    // involves:@me keeps a common name like "main" from matching strangers' PRs.
+    const q = `is:pr involves:@me head:"${branch.replace(/"/g, "")}" sort:updated-desc`;
+    const data = await github<{ search: { nodes: ({ number: number; headRefName: string; repository: { nameWithOwner: string } } | Record<string, never>)[] } }>(
+      `query Branch($q: String!) { search(query: $q, type: ISSUE, first: 5) { nodes { ... on PullRequest { number headRefName repository { nameWithOwner } } } } }`,
+      { q },
+    );
+    const match = data.search.nodes.find(
+      (node): node is { number: number; headRefName: string; repository: { nameWithOwner: string } } =>
+        "number" in node && node.headRefName === branch,
+    );
+    return match ? `${match.repository.nameWithOwner}#${match.number}` : null;
+  }
+
+  /** The PR a thread works on: its stored link, else its branch's PR. */
+  async function linkForThread(threadId: string): Promise<{ key: string | null; source: "manual" | "branch" | "unlinked" }> {
+    const stored = storedLink(threadId);
+    if (stored !== undefined) return stored.key === null ? { key: null, source: "unlinked" } : { key: stored.key, source: "manual" };
+    const thread = await bb.sdk.threads.get({ threadId });
+    if (!thread.environmentId) return { key: null, source: "branch" };
+    const environment = await bb.sdk.environments.get({ environmentId: thread.environmentId });
+    if (!environment.branchName) return { key: null, source: "branch" };
+    return { key: await prForBranch(environment.branchName), source: "branch" };
+  }
+
+  /** Turns "#123" into owner/repo#123 using the thread's current PR repo. */
+  async function resolveReference(input: string, threadId: string): Promise<PrRef> {
+    const parsed = parsePrReference(input);
+    if (parsed === null) throw new Error(`"${input}" isn't a pull request. Use a URL, owner/repo#123, or #123.`);
+    if ("owner" in parsed) return parsed;
+    const current = await linkForThread(threadId).catch(() => null);
+    const repo = current?.key ? parsePrKey(current.key) : null;
+    if (repo === null) throw new Error(`Can't tell which repository #${parsed.number} is in. Use owner/repo#${parsed.number} or the PR URL.`);
+    return { owner: repo.owner, name: repo.name, number: parsed.number };
+  }
+
   bb.rpc.register(rpcContract, {
     status: async () => {
       const auth = await resolveToken();
@@ -483,18 +561,20 @@ export default async function plugin(bb: BbPluginApi) {
     },
     prs_list: ({ scope, includeClosed, query }) => listPullRequests(scope, includeClosed, query),
     pr_get: ({ key }) => getPullRequest(key),
-    pr_for_branch: async ({ branch }) => {
-      // involves:@me keeps a common name like "main" from matching strangers' PRs.
-      const q = `is:pr involves:@me head:"${branch.replace(/"/g, "")}" sort:updated-desc`;
-      const data = await github<{ search: { nodes: ({ number: number; headRefName: string; repository: { nameWithOwner: string } } | Record<string, never>)[] } }>(
-        `query Branch($q: String!) { search(query: $q, type: ISSUE, first: 5) { nodes { ... on PullRequest { number headRefName repository { nameWithOwner } } } } }`,
-        { q },
-      );
-      const match = data.search.nodes.find(
-        (node): node is { number: number; headRefName: string; repository: { nameWithOwner: string } } =>
-          "number" in node && node.headRefName === branch,
-      );
-      return { key: match ? `${match.repository.nameWithOwner}#${match.number}` : null };
+    pr_for_branch: async ({ branch }) => ({ key: await prForBranch(branch) }),
+    link_get: ({ threadId }) => {
+      const stored = storedLink(threadId);
+      return { stored: stored !== undefined, key: stored?.key ?? null };
+    },
+    link_set: async ({ threadId, key }) => {
+      // Linking checks the PR exists, so a typo doesn't stick.
+      if (key !== null) await getChecks(key);
+      storeLink(threadId, key === null ? null : prKey(key));
+      return { ok: true as const };
+    },
+    link_reset: ({ threadId }) => {
+      clearLink(threadId);
+      return { ok: true as const };
     },
     reviewer_candidates: async ({ key, query }) => {
       type RawUser = { __typename: string; login: string; avatarUrl: string; name?: string | null };
@@ -621,21 +701,71 @@ export default async function plugin(bb: BbPluginApi) {
   const usage = [
     "Usage:",
     "  bb github-kit prs [--scope review|reviewed|authored|assigned|involved] [--closed] [--json] [search...]",
+    "  bb github-kit current [--json]           (PR linked to this thread)",
+    "  bb github-kit link <url|owner/repo#N|#N> (link this thread to a PR)",
+    "  bb github-kit unlink                     (unlink this thread, hiding the branch match)",
+    "  bb github-kit relink                     (forget the manual link, go back to the branch)",
     "",
     "The scope defaults to review. Search accepts GitHub qualifiers, e.g. repo:owner/name.",
   ].join("\n");
   bb.cli.register({
     name: "github-kit",
-    summary: "List your GitHub pull requests",
+    summary: "List your GitHub pull requests and link threads to them",
     commands: [
+      { name: "current", summary: "Show the PR linked to the current thread", usage: "bb github-kit current [--json]" },
+      { name: "link", summary: "Link the current thread to a pull request", usage: "bb github-kit link <url|owner/repo#N|#N>" },
+      { name: "unlink", summary: "Unlink the current thread from its pull request", usage: "bb github-kit unlink" },
+      { name: "relink", summary: "Drop the manual link and use the branch's PR again", usage: "bb github-kit relink" },
       {
         name: "prs",
         summary: "List pull requests awaiting your review, authored by you, assigned to you, or involving you",
         usage: "bb github-kit prs [--scope review|reviewed|authored|assigned|involved] [--closed] [--json] [search...]",
       },
     ],
-    async run(argv) {
+    async run(argv, context) {
       const [command, ...rest] = argv;
+      if (command === "current" || command === "link" || command === "unlink" || command === "relink") {
+        const threadId = context?.threadId;
+        if (threadId === undefined) return { exitCode: 1, stderr: `\`${command}\` only works from inside a BB thread.` };
+        try {
+          if (command === "link") {
+            if (rest.length !== 1) return { exitCode: 1, stderr: usage };
+            const ref = await resolveReference(rest[0]!, threadId);
+            await getChecks(ref);
+            storeLink(threadId, prKey(ref));
+            return { exitCode: 0, stdout: `Linked this thread to ${prKey(ref)}.` };
+          }
+          if (command === "unlink") {
+            storeLink(threadId, null);
+            return { exitCode: 0, stdout: "Unlinked this thread from its pull request." };
+          }
+          if (command === "relink") {
+            clearLink(threadId);
+            const link = await linkForThread(threadId);
+            return { exitCode: 0, stdout: link.key ? `Back to the branch's PR, ${link.key}.` : "Back to the branch lookup; no PR found for it yet." };
+          }
+          const link = await linkForThread(threadId);
+          if (link.key === null) {
+            return { exitCode: 1, stderr: link.source === "unlinked" ? "This thread was unlinked from its PR." : "No pull request for this thread's branch." };
+          }
+          const pr = await getPullRequest(parsePrKey(link.key)!);
+          if (rest.includes("--json")) {
+            return { exitCode: 0, stdout: bounded(JSON.stringify({ source: link.source, key: pr.key, title: pr.title, url: pr.url, state: pr.state, isDraft: pr.isDraft, head: pr.headRefName, base: pr.baseRefName, reviewDecision: pr.reviewDecision, checks: pr.checks })) };
+          }
+          return {
+            exitCode: 0,
+            stdout: [
+              `${pr.key}: ${pr.title}`,
+              `URL: ${pr.url}`,
+              `State: ${pr.isDraft ? "draft" : pr.state.toLowerCase()} · Review: ${pr.reviewDecision ?? "none"} · Checks: ${pr.checks ?? "none"}`,
+              `Branch: ${pr.headRefName} -> ${pr.baseRefName}`,
+              `Linked via ${link.source === "manual" ? "a manual link" : "the thread's branch"}.`,
+            ].join("\n"),
+          };
+        } catch (cause) {
+          return { exitCode: 1, stderr: errorMessage(cause) };
+        }
+      }
       if (command !== "prs") {
         const isHelp = command === undefined || command === "help" || command === "--help";
         return isHelp ? { exitCode: 0, stdout: usage } : { exitCode: 1, stderr: usage };

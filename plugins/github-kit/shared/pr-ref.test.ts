@@ -20,3 +20,14 @@ test("round-trips keys", () => {
   assert.equal(parsePrKey("a/b#0"), null);
   assert.equal(parsePrKey("a/b/c#1"), null);
 });
+
+import { parsePrReference } from "./pr-ref.ts";
+
+test("PR references accept URLs, keys and bare numbers", () => {
+  assert.deepEqual(parsePrReference(" https://github.com/a/b/pull/7 "), { owner: "a", name: "b", number: 7 });
+  assert.deepEqual(parsePrReference("a/b#7"), { owner: "a", name: "b", number: 7 });
+  assert.deepEqual(parsePrReference("#7"), { number: 7 });
+  assert.deepEqual(parsePrReference("7"), { number: 7 });
+  assert.equal(parsePrReference("#0"), null);
+  assert.equal(parsePrReference("GIG-12"), null);
+});

@@ -13,6 +13,7 @@ import { THREAD_PANEL_ACTION_ID, ThreadPrPanel } from "./views/ThreadPrPanel";
 import { DiffWithComments } from "./views/DiffWithComments";
 import { HomeSection } from "./views/HomeSection";
 import { SidebarPrBadges } from "./views/SidebarPrBadges";
+import { ThreadHeaderPr } from "./views/ThreadHeaderPr";
 import { parsePrKey, prKey } from "./shared/pr-ref";
 import type { rpcContract } from "./server";
 import { isString, readUi, writeUi } from "./views/uiState";
@@ -102,6 +103,11 @@ export default definePluginApp((app) => {
     id: "reviews",
     title: "Reviews",
     component: HomeSection,
+  });
+  app.slots.experimental_threadHeaderAction({
+    id: "linked-pr",
+    title: "Pull request",
+    component: ThreadHeaderPr,
   });
   app.slots.threadPanelAction({
     id: THREAD_PANEL_ACTION_ID,
