@@ -19,6 +19,7 @@ Then install from the Plugins page, or run `bb plugin install linear-issues@giga
 | [usage-bar](plugins/usage-bar) | Always-visible provider usage bars in the sidebar footer, Orca style. |
 | [machine-stats](plugins/machine-stats) | Live CPU, RAM and disk usage of the thread's machine in the sidebar footer, next to Usage Bar. |
 | [traefik-stacks](plugins/traefik-stacks) | The staging slugs and Traefik services running on the thread's machine, with a destroy button per slug, in the sidebar footer. |
+| [browser-markup](plugins/browser-markup) | Screenshot a desktop Browser tab, draw on it Orca style, then copy the image or add it to the prompt. |
 | [pi-provider](plugins/pi-provider) | A fork of bb's Pi provider: pi-toolbox subagents in the native agent display, `/reload`, and every Pi-loaded skill in the `/` menu. Replaces the bundled `provider-pi` (same provider id), so disable that one first. |
 
 ## Releasing
