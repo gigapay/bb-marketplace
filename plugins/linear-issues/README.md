@@ -99,11 +99,11 @@ The project page's Updates tab has a composer (`views/UpdateComposer.tsx`) for a
 
 ## Thread links
 
-A thread is linked to an issue when it was started from a ticket (issue page or composer button), when you link it by hand (from the thread header, the issue page, or `bb linear-issues link <id>`), when its worktree branch contains the identifier, or when it shares a worktree whose linked threads all point at one issue. Stored links live in the plugin's SQLite database. A stored row overrides the branch match, and a stored "unlinked" row hides one. Branch matches are computed on read from `environment.branchName`, and only keys of real Linear teams count.
+A thread is linked to an issue when it was started from a ticket (issue page or composer button), when you link it by hand (from the thread header, the issue page, or `bb linear link <id>`), when its worktree branch contains the identifier, or when it shares a worktree whose linked threads all point at one issue. Stored links live in the plugin's SQLite database. A stored row overrides the branch match, and a stored "unlinked" row hides one. Branch matches are computed on read from `environment.branchName`, and only keys of real Linear teams count.
 
 ## What's in it
 
-- `server.ts` is the backend. It holds the Linear GraphQL client, the RPC contract used by the page, and the `bb linear-issues` CLI.
+- `server.ts` is the backend. It holds the Linear GraphQL client, the RPC contract used by the page, and the `bb linear` CLI.
 - `app.tsx` is the page entry. The route `/plugins/linear-issues/issues/<IDENTIFIER>` opens an issue directly.
 - `views/Filters.tsx` is the filter bar under the list: labels (with their Linear colours and groups), priority, and project (including "No project"). Filters are OR within a kind and AND across kinds. The server turns them into an `IssueFilter` (`projects.ts`, `issueFilterClauses`).
 - `views/Projects.tsx` is the Projects tab and the project page. The list is grouped by status, with health, progress and target date, and can show only your projects (lead or member) or include completed ones. The project page has an overview (milestones, the full description from `content`, the latest update), every project update with its health, and the project's issues grouped like the issue list. Routes are `/plugins/linear-issues/issues/projects` and `/plugins/linear-issues/issues/projects/<id>`.
@@ -116,7 +116,7 @@ A thread is linked to an issue when it was started from a ticket (issue page or 
 - `worktree/provider.ts` is the Linear worktree provider. `worktree/host` and `worktree/vendor` are the host-side git code copied from BB, and `host.ts` and `contract.ts` merge it with the branch rename into the plugin's single host entry.
 - `assets/linear.svg` is the Linear mark. It's the plugin icon, and `linear-issues/linear` everywhere in the UI.
 - `lib/prompt.ts` builds that seeded prompt. The description is wrapped as untrusted reference data.
-- `skills/linear-issues/SKILL.md` tells agents how to use `bb linear-issues show <id>`.
+- `skills/linear/SKILL.md` is the `/linear` skill, which teaches agents the `bb linear` CLI. `bb linear-issues` stays as a deprecated alias, so prompts from before the rename keep working.
 
 ## Develop
 
