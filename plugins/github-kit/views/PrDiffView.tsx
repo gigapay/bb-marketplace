@@ -479,7 +479,7 @@ function FileCard({
           />
           Reviewed
         </label>
-        <UrlLink href={`${prUrl}/files`} target="_blank" aria-label="Open on GitHub" className="shrink-0 text-muted-foreground hover:text-foreground">
+        <UrlLink data-github-kit-external="" href={`${prUrl}/files`} target="_blank" aria-label="Open on GitHub" className="shrink-0 text-muted-foreground hover:text-foreground">
           <Icon name="ExternalLink" className="size-3.5" />
         </UrlLink>
       </header>

@@ -189,7 +189,7 @@ function CheckRow({ check, now }: { check: Check; now: number }) {
   return (
     <li>
       {check.url ? (
-        <UrlLink
+        <UrlLink data-github-kit-external=""
           href={check.url}
           target="_blank"
           className="flex w-full items-center gap-3 px-3 py-2 text-sm text-foreground no-underline hover:bg-accent/50"
