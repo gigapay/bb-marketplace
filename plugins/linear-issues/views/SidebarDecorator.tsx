@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { LINEAR_ICON, PLUGIN_ID } from "@/lib/plugin-id";
 import { createPortal } from "react-dom";
 import { useBbNavigate, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
@@ -146,7 +147,7 @@ function SidebarBadge({
   return (
     <span
       data-bb-plugin-root=""
-      data-bb-plugin="linear-issues"
+      data-bb-plugin={PLUGIN_ID}
       {...{ [MARKER]: "" }}
       className="pointer-events-auto relative z-[31] ml-1.5 inline-flex shrink-0 items-center"
     >
@@ -163,12 +164,12 @@ function SidebarBadge({
               navigate.toPluginPanel("issues", { subPath: identifier });
             }}
           >
-            <Icon name="linear-issues/linear" className="size-3.5" />
+            <Icon name={LINEAR_ICON} className="size-3.5" />
           </button>
         </HoverCardTrigger>
         <HoverCardContent side="right" align="start" className="w-72 p-3">
           <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
-            <Icon name="linear-issues/linear" className="size-3 text-[#5E6AD2]" />
+            <Icon name={LINEAR_ICON} className="size-3 text-[#5E6AD2]" />
             {identifier}
           </p>
           {issue ? (

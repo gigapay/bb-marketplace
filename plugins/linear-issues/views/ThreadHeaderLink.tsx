@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LINEAR_ICON } from "@/lib/plugin-id";
 import { toast } from "sonner";
 import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import type { PluginThreadHeaderActionProps } from "@get-bb/plugin-sdk/app";
@@ -63,7 +64,7 @@ export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHe
           aria-label="Link a Linear issue"
           onClick={() => setPickerOpen(true)}
         >
-          <Icon name="linear-issues/linear" className="size-4" />
+          <Icon name={LINEAR_ICON} className="size-4" />
           {isCompactViewport ? null : <span>Link issue</span>}
         </Button>
         <IssuePickerDialog
@@ -92,7 +93,7 @@ export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHe
           if (!opened) setMenuOpen(true);
         }}
       >
-        <Icon name="linear-issues/linear" className="size-3.5 text-[#5E6AD2]" />
+        <Icon name={LINEAR_ICON} className="size-3.5 text-[#5E6AD2]" />
         <span className="font-mono text-xs">{link.identifier}</span>
       </Button>
 
@@ -118,7 +119,7 @@ export function ThreadHeaderLink({ threadId, isCompactViewport }: PluginThreadHe
                 navigate.toPluginPanel("issues", { subPath: link.identifier });
               }}
             >
-              <Icon name="linear-issues/linear" className="size-4" />
+              <Icon name={LINEAR_ICON} className="size-4" />
               Open issue
             </Button>
             <Button

@@ -290,7 +290,7 @@ export function registerLinearWorktree(bb: BbPluginApi, deps: LinearWorktreeDeps
     id: LINEAR_WORKTREE_PROVIDER_ID,
     displayName: "Linear worktree",
     description: "A git worktree on the ticket's Linear branch, in your worktrees folder.",
-    icon: "linear-issues/linear",
+    icon: `${bb.pluginId}/linear`,
     requires: { gitCheckout: true },
     inputs: linearWorktreeInputsSchema,
     policy: { pathKeys: "per-attempt" },
