@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { LINEAR_ICON } from "@/lib/plugin-id";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -161,7 +162,7 @@ export function IssueList({ onOpen }: { onOpen: (identifier: string) => void }) 
           onClick={() => setTriageOpen(true)}
           disabled={!issues || issues.length === 0}
         >
-          <Icon name="linear-issues/linear" className="size-3.5 text-[#5E6AD2]" />
+          <Icon name={LINEAR_ICON} className="size-3.5 text-[#5E6AD2]" />
           Triage with Jev
         </Button>
         <Button variant="ghost" size="icon" aria-label="Refresh" onClick={load} disabled={loading}>

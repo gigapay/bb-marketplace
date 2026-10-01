@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { LINEAR_ICON } from "@/lib/plugin-id";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { Markdown, UrlLink, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
@@ -129,7 +130,7 @@ function LinkedIssue({
     <article className="space-y-4">
       <header>
         <div className="flex items-center gap-2">
-          <Icon name="linear-issues/linear" className="size-3.5 shrink-0 text-[#5E6AD2]" />
+          <Icon name={LINEAR_ICON} className="size-3.5 shrink-0 text-[#5E6AD2]" />
           <span className="font-mono text-xs text-muted-foreground">{identifier}</span>
           <span className="text-xs text-muted-foreground">· {sourceLabel}</span>
           <Button

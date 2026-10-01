@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LINEAR_ICON } from "@/lib/plugin-id";
 import { toast } from "sonner";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
@@ -140,7 +141,7 @@ export function ProjectTriageDialog({
       <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Icon name="linear-issues/linear" className="size-4 text-[#5E6AD2]" />
+            <Icon name={LINEAR_ICON} className="size-4 text-[#5E6AD2]" />
             Triage projects with Jev
           </DialogTitle>
           <DialogDescription>

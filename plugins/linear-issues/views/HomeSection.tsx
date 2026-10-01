@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { LINEAR_ICON } from "@/lib/plugin-id";
 import { toast } from "sonner";
 import {
   experimental_useSidebarThreads as useSidebarThreads,
@@ -85,7 +86,7 @@ export function HomeSection({ projectId }: PluginHomepageSectionProps) {
     <div>
       {/* BB renders the section title; this row only adds the count and a way out. */}
       <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
-        <Icon name="linear-issues/linear" className="size-3.5 text-[#5E6AD2]" />
+        <Icon name={LINEAR_ICON} className="size-3.5 text-[#5E6AD2]" />
         <span>{issues ? `${issues.length} open, assigned to you` : "Your open issues"}</span>
         <Button
           variant="ghost"

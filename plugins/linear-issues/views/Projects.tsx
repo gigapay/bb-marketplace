@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { LINEAR_ICON } from "@/lib/plugin-id";
 import type { ReactNode } from "react";
 import { Markdown, UrlLink, useRpc } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
@@ -127,7 +128,7 @@ export function ProjectList({ onOpen }: { onOpen: (projectId: string, tab?: "upd
           onClick={() => setTriageOpen(true)}
           disabled={!projects || projects.length === 0}
         >
-          <Icon name="linear-issues/linear" className="size-3.5 text-[#5E6AD2]" />
+          <Icon name={LINEAR_ICON} className="size-3.5 text-[#5E6AD2]" />
           Triage with Jev
         </Button>
       </div>
@@ -445,7 +446,7 @@ export function ProjectDetailView({
                     onClick={() => setTriageOpen(true)}
                     disabled={visibleIssues.length === 0}
                   >
-                    <Icon name="linear-issues/linear" className="size-3.5 text-[#5E6AD2]" />
+                    <Icon name={LINEAR_ICON} className="size-3.5 text-[#5E6AD2]" />
                     Triage with Jev
                   </Button>
                 </div>

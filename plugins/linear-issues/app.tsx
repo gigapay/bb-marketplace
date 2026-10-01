@@ -2,6 +2,7 @@
 // subPath carries the open issue identifier so deep links and back/forward
 // work: /plugins/linear-issues/issues/ENG-42.
 import { useEffect, useState } from "react";
+import { LINEAR_ICON } from "@/lib/plugin-id";
 import { definePluginApp, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import type { PluginNavPanelProps } from "@get-bb/plugin-sdk/app";
 import { EmptyState, ErrorLine, errorText } from "./views/shared";
@@ -18,7 +19,6 @@ import type { rpcContract } from "./server";
 import { IDENTIFIER_PATTERN } from "./shared/links";
 
 const PANEL_PATH = "issues";
-const LINEAR_ICON = "linear-issues/linear";
 
 
 let returnTo = "";
