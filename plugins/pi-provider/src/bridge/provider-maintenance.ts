@@ -43,6 +43,18 @@ function bunGlobalInstallCommand(
   return { command, args, displayCommand: formatCommand(command, args) };
 }
 
+function pnpmCommand(): string {
+  return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+}
+
+function pnpmGlobalInstallCommand(
+  npmPackage: string,
+): ProviderInstallationCommand {
+  const command = pnpmCommand();
+  const args = ["add", "-g", `${npmPackage}@latest`];
+  return { command, args, displayCommand: formatCommand(command, args) };
+}
+
 function firstOutputLine(output: string | null): string | null {
   return (
     output
@@ -87,46 +99,69 @@ async function shellExecTarget(executablePath: string): Promise<string | null> {
   }
 }
 
-async function isBunManagedPi(executablePath: string | null): Promise<boolean> {
-  if (executablePath === null) return false;
-  const bunBin = firstOutputLine(
-    await commandOutput(bunCommand(), ["pm", "bin", "-g"]),
-  );
-  if (bunBin === null) return false;
-  if (pathIsInside(executablePath, bunBin)) return true;
-  const bunPi = path.join(
-    bunBin,
+// Global package managers expose pi either directly in their global bin
+// directory or through a wrapper that execs that binary.
+async function isPiInGlobalBin(
+  executablePath: string | null,
+  globalBin: string | null,
+): Promise<boolean> {
+  if (executablePath === null || globalBin === null) return false;
+  if (pathIsInside(executablePath, globalBin)) return true;
+  const globalPi = path.join(
+    globalBin,
     process.platform === "win32" ? "pi.exe" : "pi",
   );
-  const [resolvedExecutable, resolvedBunPi] = await Promise.all([
+  const [resolvedExecutable, resolvedGlobalPi] = await Promise.all([
     realpath(executablePath).catch(() => null),
-    realpath(bunPi).catch(() => null),
+    realpath(globalPi).catch(() => null),
   ]);
   if (
     resolvedExecutable !== null &&
-    (pathIsInside(resolvedExecutable, bunBin) ||
-      resolvedExecutable === resolvedBunPi)
+    (pathIsInside(resolvedExecutable, globalBin) ||
+      resolvedExecutable === resolvedGlobalPi)
   ) {
     return true;
   }
   const delegatedTarget = await shellExecTarget(executablePath);
   if (delegatedTarget === null) return false;
-  if (path.resolve(delegatedTarget) === path.resolve(bunPi)) return true;
+  if (path.resolve(delegatedTarget) === path.resolve(globalPi)) return true;
   const resolvedDelegatedTarget = await realpath(delegatedTarget).catch(
     () => null,
   );
   return (
     resolvedDelegatedTarget !== null &&
-    resolvedDelegatedTarget === resolvedBunPi
+    resolvedDelegatedTarget === resolvedGlobalPi
+  );
+}
+
+async function isBunManagedPi(executablePath: string | null): Promise<boolean> {
+  if (executablePath === null) return false;
+  return isPiInGlobalBin(
+    executablePath,
+    firstOutputLine(await commandOutput(bunCommand(), ["pm", "bin", "-g"])),
+  );
+}
+
+async function isPnpmManagedPi(
+  executablePath: string | null,
+): Promise<boolean> {
+  if (executablePath === null) return false;
+  return isPiInGlobalBin(
+    executablePath,
+    firstOutputLine(await commandOutput(pnpmCommand(), ["bin", "-g"])),
   );
 }
 
 async function piGlobalInstallCommand(
   executablePath: string | null,
 ): Promise<ProviderInstallationCommand> {
-  return (await isBunManagedPi(executablePath))
-    ? bunGlobalInstallCommand(PI_NPM_PACKAGE)
-    : npmGlobalInstallCommand(PI_NPM_PACKAGE);
+  if (await isBunManagedPi(executablePath)) {
+    return bunGlobalInstallCommand(PI_NPM_PACKAGE);
+  }
+  if (await isPnpmManagedPi(executablePath)) {
+    return pnpmGlobalInstallCommand(PI_NPM_PACKAGE);
+  }
+  return npmGlobalInstallCommand(PI_NPM_PACKAGE);
 }
 
 export async function probePiVersion(): Promise<PiVersionProbe> {
