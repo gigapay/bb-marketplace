@@ -54,12 +54,12 @@ export function Discussion({
   return (
     <article
       className={cn(
-        "rounded-lg border bg-card text-card-foreground",
-        queue?.queued ? "border-primary" : "border-border",
+        "rounded-xl border bg-card text-card-foreground",
+        queue?.queued ? "border-primary" : "border-border/70",
         item.isResolved && "opacity-80",
       )}
     >
-      <header className="flex items-center gap-2 px-3 py-2 text-xs">
+      <header className="flex items-center gap-2 px-4 pb-1 pt-3 text-sm">
         {queue && !item.isResolved ? (
           <Checkbox checked={queue.queued} onCheckedChange={queue.onToggle} aria-label="Queue for the agent" />
         ) : null}
@@ -71,9 +71,7 @@ export function Discussion({
             {item.line !== null ? `:${item.line}` : ""}
           </span>
         ) : null}
-        {item.kind === "review" && item.reviewState ? (
-          <span className="text-muted-foreground">{item.reviewState.toLowerCase().replace("_", " ")}</span>
-        ) : null}
+        {item.kind === "review" && item.reviewState ? <ReviewStateChip state={item.reviewState} /> : null}
         {item.isOutdated ? <span className="shrink-0 text-[#bf8700]">Outdated</span> : null}
         {item.isResolved ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-[#1f883d]">
@@ -103,11 +101,11 @@ export function Discussion({
 
       {expanded ? (
         <>
-          <div className="border-t border-border px-3 py-2">
-            <Markdown content={item.body} className="text-sm" />
+          <div className="px-4 pb-3 pt-1">
+            <Markdown content={item.body} className="text-[15px] leading-relaxed" />
           </div>
           {item.replies.length > 0 ? (
-            <ol className="space-y-3 border-t border-border px-3 py-3">
+            <ol className="space-y-3 border-t border-border/70 px-4 py-3">
               {item.replies.map((reply) => (
                 <li key={reply.id} className="ml-2 border-l-2 border-border pl-3">
                   <p className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
@@ -119,7 +117,7 @@ export function Discussion({
               ))}
             </ol>
           ) : null}
-          <footer className="border-t border-border px-3 py-2">
+          <footer className="border-t border-border/70 px-4 py-2.5">
             {replying ? (
               <Composer
                 prKey={prKey}
@@ -134,8 +132,12 @@ export function Discussion({
               />
             ) : (
               <div className="flex flex-wrap items-center gap-3 text-xs">
-                <button type="button" onClick={() => setReplying(true)} className="text-muted-foreground hover:text-foreground">
-                  Reply
+                <button
+                  type="button"
+                  onClick={() => setReplying(true)}
+                  className="min-w-40 flex-1 text-left text-sm text-muted-foreground hover:text-foreground"
+                >
+                  Leave a reply…
                 </button>
                 {item.kind === "thread" && (item.isResolved ? item.canUnresolve : item.canResolve) ? (
                   <button
@@ -158,10 +160,27 @@ export function Discussion({
   );
 }
 
+const REVIEW_STATE_CHIP: Record<string, { label: string; className: string }> = {
+  APPROVED: { label: "Approved", className: "text-emerald-500" },
+  CHANGES_REQUESTED: { label: "Changes requested", className: "text-destructive" },
+  COMMENTED: { label: "Reviewed", className: "text-muted-foreground" },
+  DISMISSED: { label: "Dismissed", className: "text-muted-foreground" },
+};
+
+function ReviewStateChip({ state }: { state: string }) {
+  const chip = REVIEW_STATE_CHIP[state] ?? { label: state.toLowerCase(), className: "text-muted-foreground" };
+  return (
+    <span className={cn("inline-flex shrink-0 items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 text-xs", chip.className)}>
+      <Icon name={state === "APPROVED" ? "Check" : "MessageSquare"} className="size-3" />
+      {chip.label}
+    </span>
+  );
+}
+
 function Author({ actor }: { actor: Actor | null }) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
-      {actor ? <img src={actor.avatarUrl} alt="" className="size-5 shrink-0 rounded-full" /> : null}
+      {actor ? <img src={actor.avatarUrl} alt="" className="size-6 shrink-0 rounded-full" /> : null}
       <span className="truncate font-medium text-foreground">{actor?.login ?? "ghost"}</span>
       {actor?.isBot ? (
         <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-accent-foreground">bot</span>
