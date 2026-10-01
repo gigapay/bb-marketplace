@@ -14,7 +14,7 @@ You can also start from a ticket in BB's regular new-thread composer. Use the Li
 
 ## Create and edit
 
-Create issues and projects from the Linear page. Edit an issue's title, description, status, priority, assignee, labels, project and milestone in place. Edit or delete your comments and project updates. Agents get the same through `bb linear-issues`: `create`, `update`, `comment`, `project-create`, `update-post` and more.
+Create issues and projects from the Linear page. Edit an issue's title, description, status, priority, assignee, labels, project and milestone in place. Edit or delete your comments and project updates. Agents get the same through `bb linear`: `create`, `update`, `comment`, `project-create`, `update-post` and more.
 
 ## Linear worktrees
 
@@ -28,7 +28,7 @@ The plugin adds a "Linear worktree" environment. It branches off the project's p
 
 A thread is linked to an issue in three cases: it was started from the issue (from either composer), you linked it by hand, its worktree branch contains the identifier, or it runs in a worktree that's already linked (`yoann/gig-123-fix-login` links to `GIG-123`). Linked worktrees and threads get a Linear icon in the sidebar. Hover it to see the ticket's title and status. The thread header shows the linked issue. Click it to open a "Linear issue" tab in the thread's side panel, with the ticket's status, description and comments, and buttons to change or unlink it. A manual choice always wins over the branch.
 
-Agents get `bb linear-issues current`, `show`, `link` and `unlink`.
+Agents get `bb linear current`, `show`, `link` and `unlink`.
 
 ## Requirements
 

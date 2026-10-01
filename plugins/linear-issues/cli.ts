@@ -1,4 +1,4 @@
-// The `bb linear-issues` CLI agents use from threads: read issues and
+// The `bb linear` CLI agents use from threads: read issues and
 // projects, and write issues, comments, projects and project updates.
 // Names are accepted everywhere ids are ("In Progress", "me", "Bug").
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
@@ -101,7 +101,7 @@ function formatProject(project: ProjectDetail): string {
 const bounded = (value: string) => (value.length > 200_000 ? `${value.slice(0, 200_000)}\n… (truncated)` : value);
 const errorMessage = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
-export const USAGE = `Usage: bb linear-issues <command> [options] [--json]
+export const USAGE = `Usage: bb linear <command> [options] [--json]
 
 Issues
   list                                   Your open assigned issues
@@ -168,29 +168,29 @@ export function registerCli(bb: BbPluginApi, deps: CliDeps) {
 
   const done = (json: boolean, value: unknown, message: string) => ({ exitCode: 0, stdout: bounded(json ? JSON.stringify(value) : message) });
 
-  bb.cli.register({
-    name: "linear-issues",
+  const cli: Parameters<typeof bb.cli.register>[0] = {
+    name: "linear",
     summary: "Read and write your Linear issues, comments, projects and project updates",
     commands: [
-      { name: "list", summary: "List your open assigned issues", usage: "bb linear-issues list [--json]" },
-      { name: "show", summary: "Show an issue with its comments", usage: "bb linear-issues show <ID> [--json]" },
-      { name: "create", summary: "Create an issue", usage: "bb linear-issues create --title <t> [options]" },
-      { name: "update", summary: "Edit an issue's fields", usage: "bb linear-issues update <ID> [options]" },
-      { name: "archive", summary: "Archive an issue", usage: "bb linear-issues archive <ID>" },
-      { name: "comment", summary: "Comment on an issue or reply", usage: "bb linear-issues comment <ID> <markdown> [--reply-to <id>]" },
-      { name: "comment-edit", summary: "Edit a comment", usage: "bb linear-issues comment-edit <comment id> <markdown>" },
-      { name: "comment-delete", summary: "Delete a comment", usage: "bb linear-issues comment-delete <comment id>" },
-      { name: "projects", summary: "List projects", usage: "bb linear-issues projects [--all]" },
-      { name: "project", summary: "Show a project", usage: "bb linear-issues project <name|id>" },
-      { name: "project-create", summary: "Create a project", usage: "bb linear-issues project-create --name <n> [options]" },
-      { name: "project-edit", summary: "Edit a project", usage: "bb linear-issues project-edit <name|id> [options]" },
-      { name: "project-delete", summary: "Move a project to the trash", usage: "bb linear-issues project-delete <name|id>" },
-      { name: "update-post", summary: "Post a project update", usage: "bb linear-issues update-post <project> --health <h> <markdown>" },
-      { name: "update-edit", summary: "Edit a project update", usage: "bb linear-issues update-edit <update id> [--health <h>] [<markdown>]" },
-      { name: "update-archive", summary: "Archive a project update", usage: "bb linear-issues update-archive <update id>" },
-      { name: "current", summary: "Show the issue linked to this thread", usage: "bb linear-issues current [--json]" },
-      { name: "link", summary: "Link this thread to an issue", usage: "bb linear-issues link <ID>" },
-      { name: "unlink", summary: "Unlink this thread", usage: "bb linear-issues unlink" },
+      { name: "list", summary: "List your open assigned issues", usage: "bb linear list [--json]" },
+      { name: "show", summary: "Show an issue with its comments", usage: "bb linear show <ID> [--json]" },
+      { name: "create", summary: "Create an issue", usage: "bb linear create --title <t> [options]" },
+      { name: "update", summary: "Edit an issue's fields", usage: "bb linear update <ID> [options]" },
+      { name: "archive", summary: "Archive an issue", usage: "bb linear archive <ID>" },
+      { name: "comment", summary: "Comment on an issue or reply", usage: "bb linear comment <ID> <markdown> [--reply-to <id>]" },
+      { name: "comment-edit", summary: "Edit a comment", usage: "bb linear comment-edit <comment id> <markdown>" },
+      { name: "comment-delete", summary: "Delete a comment", usage: "bb linear comment-delete <comment id>" },
+      { name: "projects", summary: "List projects", usage: "bb linear projects [--all]" },
+      { name: "project", summary: "Show a project", usage: "bb linear project <name|id>" },
+      { name: "project-create", summary: "Create a project", usage: "bb linear project-create --name <n> [options]" },
+      { name: "project-edit", summary: "Edit a project", usage: "bb linear project-edit <name|id> [options]" },
+      { name: "project-delete", summary: "Move a project to the trash", usage: "bb linear project-delete <name|id>" },
+      { name: "update-post", summary: "Post a project update", usage: "bb linear update-post <project> --health <h> <markdown>" },
+      { name: "update-edit", summary: "Edit a project update", usage: "bb linear update-edit <update id> [--health <h>] [<markdown>]" },
+      { name: "update-archive", summary: "Archive a project update", usage: "bb linear update-archive <update id>" },
+      { name: "current", summary: "Show the issue linked to this thread", usage: "bb linear current [--json]" },
+      { name: "link", summary: "Link this thread to an issue", usage: "bb linear link <ID>" },
+      { name: "unlink", summary: "Unlink this thread", usage: "bb linear unlink" },
     ],
     async run(argv, context) {
       let parsed: Parsed;
@@ -411,5 +411,9 @@ export function registerCli(bb: BbPluginApi, deps: CliDeps) {
       }
       return { exitCode: 1, stderr: USAGE };
     },
-  });
+  };
+  bb.cli.register(cli);
+  // Threads started before the rename have `bb linear-issues …` in their
+  // prompts; keep that spelling working.
+  bb.cli.register({ ...cli, name: "linear-issues", summary: "Deprecated alias of `bb linear`" });
 }

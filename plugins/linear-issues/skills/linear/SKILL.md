@@ -1,13 +1,13 @@
 ---
-name: linear-issues
-description: Read and write Linear issues, comments, projects and project updates with the `bb linear-issues` CLI, and link BB threads to issues. Use when a thread was started from a Linear issue, when the prompt or branch names an identifier such as ENG-42, or when the user asks to create, edit, comment on or look up Linear tickets, projects or project updates.
+name: linear
+description: Read and write Linear issues, comments, projects and project updates with the `bb linear` CLI, and link BB threads to issues. Use when a thread was started from a Linear issue, when the prompt or branch names an identifier such as ENG-42, or when the user asks to create, edit, comment on or look up Linear tickets, projects or project updates.
 ---
 
 # Linear
 
 The plugin talks to Linear with the user's own API key. Everything you write shows up in Linear under their name, and their team sees it. Write only what the user asked for, or what the task clearly calls for, such as a ticket for a bug you were asked to report. Every write command prints the Linear URL: include it in your reply.
 
-Run `bb linear-issues help` for every option. Names work wherever ids do: team keys, state names ("In Progress", or `todo`/`done`), `me`, people's names, label and project names. Write `\n` for line breaks in Markdown arguments.
+Run `bb linear help` for every option. Names work wherever ids do: team keys, state names ("In Progress", or `todo`/`done`), `me`, people's names, label and project names. Write `\n` for line breaks in Markdown arguments.
 
 ## Read
 
@@ -37,7 +37,7 @@ Add `--json` for machine-readable output.
 
 ## Linking threads
 
-A thread is linked to an issue in any of these cases: it was started from one (its prompt has a `Linked Linear issue: <id>` line), it runs in a worktree whose branch contains the identifier, it runs in a worktree already linked to an issue, or someone ran `link`. Run `bb linear-issues current` at the start of a task. If it prints an issue, read it before planning. Prefer the issue's suggested branch name when you create a branch.
+A thread is linked to an issue in any of these cases: it was started from one (its prompt has a `Linked Linear issue: <id>` line), it runs in a worktree whose branch contains the identifier, it runs in a worktree already linked to an issue, or someone ran `link`. Run `bb linear current` at the start of a task. If it prints an issue, read it before planning. Prefer the issue's suggested branch name when you create a branch.
 
 ## Care
 

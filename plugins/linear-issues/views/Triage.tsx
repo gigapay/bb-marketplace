@@ -387,7 +387,7 @@ function enrichPrompt(proposal: TriageProposalDto): string {
     `Jev flagged this ticket as not ready to start.${gaps.length ? " Missing:" : ""}`,
     ...gaps.map((gap) => `- ${gap}`),
     "",
-    `Run \`bb linear-issues show ${proposal.identifier}\` to read it, then investigate the codebase and draft a clearer description: the problem, expected behaviour, acceptance criteria, the code areas involved, and open questions for the reporter.`,
+    `Run \`bb linear show ${proposal.identifier}\` to read it, then investigate the codebase and draft a clearer description: the problem, expected behaviour, acceptance criteria, the code areas involved, and open questions for the reporter.`,
     "Don't change anything in Linear. Post the draft here so I can review it.",
   ].join("\n");
 }
