@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { UrlLink, useRpc } from "@get-bb/plugin-sdk/app";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -10,6 +10,7 @@ import type { rpcContract } from "../server";
 import { useWriteOptions } from "./editing";
 import { LinearMarkdown } from "./LinearMarkdown";
 import { HealthBadge, ProgressBar, ProjectMark, Section, UpdateCard, formatDate } from "./Projects";
+import { UpdateComposer } from "./UpdateComposer";
 import { EmptyState, ErrorLine, PriorityIcon, errorText, relativeTime } from "./shared";
 
 type Status = InitiativeSummary["status"];
@@ -46,17 +47,30 @@ export function InitiativeList({ onOpen }: { onOpen: (id: string) => void }) {
   const [error, setError] = useState<string | null>(null);
   const [mine, setMine] = useState(false);
   const [includeClosed, setIncludeClosed] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let cancelled = false;
+    setLoading(true);
     rpc.call("initiatives_list").then(
-      (result) => !cancelled && setInitiatives(result.initiatives),
-      (cause) => !cancelled && setError(errorText(cause)),
+      (result) => {
+        if (cancelled) return;
+        setInitiatives(result.initiatives);
+        setError(null);
+        setLoading(false);
+      },
+      (cause) => {
+        if (cancelled) return;
+        setError(errorText(cause));
+        setLoading(false);
+      },
     );
     return () => {
       cancelled = true;
     };
   }, [rpc]);
+
+  useEffect(() => load(), [load]);
 
   const groups = useMemo(() => {
     const viewer = options?.viewer.id ?? null;
@@ -77,6 +91,9 @@ export function InitiativeList({ onOpen }: { onOpen: (id: string) => void }) {
           <Checkbox checked={includeClosed} onCheckedChange={(checked) => setIncludeClosed(checked === true)} />
           Show completed
         </label>
+        <Button variant="ghost" size="icon" aria-label="Refresh" className="ml-auto" onClick={load} disabled={loading}>
+          <Icon name="ArrowReloadHorizontal" className={cn("size-4", loading && "animate-spin")} />
+        </Button>
       </div>
       <ErrorLine error={error} />
       <div className="mt-4 space-y-4">
@@ -157,19 +174,35 @@ export function InitiativeDetailView({
   const [initiative, setInitiative] = useState<InitiativeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"overview" | "updates" | "projects">("overview");
+  const [loading, setLoading] = useState(false);
+  // Bumped to refetch in place (refresh, after posting or editing an update).
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const reload = () => setReloadNonce((n) => n + 1);
+
+  useEffect(() => {
+    setInitiative(null);
+  }, [initiativeId]);
 
   useEffect(() => {
     let cancelled = false;
-    setInitiative(null);
-    setError(null);
+    setLoading(true);
     rpc.call("initiative_get", { id: initiativeId }).then(
-      (result) => !cancelled && setInitiative(result),
-      (cause) => !cancelled && setError(errorText(cause)),
+      (result) => {
+        if (cancelled) return;
+        setInitiative(result);
+        setError(null);
+        setLoading(false);
+      },
+      (cause) => {
+        if (cancelled) return;
+        setError(errorText(cause));
+        setLoading(false);
+      },
     );
     return () => {
       cancelled = true;
     };
-  }, [rpc, initiativeId]);
+  }, [rpc, initiativeId, reloadNonce]);
 
   return (
     <div>
@@ -203,6 +236,13 @@ export function InitiativeDetailView({
               <h1 className="text-xl font-semibold leading-tight">{initiative.name}</h1>
               {initiative.description ? <p className="mt-1 text-sm text-muted-foreground">{initiative.description}</p> : null}
             </div>
+            <Button variant="outline" size="sm" onClick={() => setTab("updates")}>
+              <Icon name="Edit" className="size-4" />
+              Write update
+            </Button>
+            <Button variant="ghost" size="icon" aria-label="Refresh" onClick={reload} disabled={loading}>
+              <Icon name="ArrowReloadHorizontal" className={cn("size-4", loading && "animate-spin")} />
+            </Button>
             <Button variant="outline" size="sm" asChild>
               <UrlLink href={initiative.url} target="_blank" data-linear-external="">
                 <Icon name="ExternalLink" className="size-4" />
@@ -276,7 +316,7 @@ export function InitiativeDetailView({
               <div className="space-y-6">
                 {initiative.updates[0] ? (
                   <Section title="Latest update">
-                    <UpdateCard update={initiative.updates[0]} readOnly />
+                    <UpdateCard update={initiative.updates[0]} kind="initiative" onChanged={reload} />
                   </Section>
                 ) : null}
                 <Section title="Description">
@@ -312,17 +352,24 @@ export function InitiativeDetailView({
                 ) : null}
               </div>
             ) : tab === "updates" ? (
-              initiative.updates.length === 0 ? (
-                <EmptyState>No initiative updates yet.</EmptyState>
-              ) : (
-                <ol className="space-y-3">
-                  {initiative.updates.map((update) => (
-                    <li key={update.id}>
-                      <UpdateCard update={update} readOnly />
-                    </li>
-                  ))}
-                </ol>
-              )
+              <div className="space-y-3">
+                <UpdateComposer
+                  target={{ kind: "initiative", id: initiative.id }}
+                  currentHealth={initiative.health}
+                  onPosted={reload}
+                />
+                {initiative.updates.length === 0 ? (
+                  <EmptyState>No initiative updates yet.</EmptyState>
+                ) : (
+                  <ol className="space-y-3">
+                    {initiative.updates.map((update) => (
+                      <li key={update.id}>
+                        <UpdateCard update={update} kind="initiative" onChanged={reload} />
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
             ) : (
               <ProjectTable projects={initiative.projects} onOpen={onOpenProject} />
             )}

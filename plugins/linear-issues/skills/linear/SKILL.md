@@ -17,7 +17,9 @@ Run `bb linear help` for every option. Names work wherever ids do: team keys, st
 | `show <ID>` | An issue with its description and threaded comments, including comment ids. |
 | `current` | The issue linked to this thread, and how it was linked. |
 | `projects [--all]` | The user's active projects (`--all`: every project, including closed ones). |
-| `project <name\|id>` | A project with milestones, its description and recent updates, including update ids. |
+| `project <name\|id>` | A project with its initiatives, resources, milestones, description and recent updates, including update ids. |
+| `initiatives [--all]` | Active, planned and proposed initiatives (`--all` adds closed ones). |
+| `initiative <name\|id>` | An initiative with its projects, description and recent updates, including update ids. |
 
 ## Write
 
@@ -32,6 +34,8 @@ Run `bb linear help` for every option. Names work wherever ids do: team keys, st
 | `project-edit <project> [same options]` / `project-delete <project>` | Edit a project, or move it to Linear's trash. |
 | `update-post <project> --health onTrack\|atRisk\|offTrack "…"` | Post a project update. |
 | `update-edit <update id> [--health …] ["…"]` / `update-archive <update id>` | Edit or archive a project update. |
+| `initiative-update-post <initiative> --health onTrack\|atRisk\|offTrack "…"` | Post an initiative update. |
+| `initiative-update-edit <update id> [--health …] ["…"]` / `initiative-update-archive <update id>` | Edit or archive an initiative update. |
 
 Add `--json` for machine-readable output.
 

@@ -105,6 +105,7 @@ function LinearPage({ subPath }: PluginNavPanelProps) {
             initialTab={parts[2] === "updates" || parts[2] === "issues" ? parts[2] : undefined}
             onBack={() => go("projects")}
             onOpenIssue={openIssueFrom(`projects/${parts[1]}`)}
+            onOpenInitiative={(id) => go(`initiatives/${encodeURIComponent(id)}`)}
           />
         ) : parts[0] === "projects" ? (
           <>

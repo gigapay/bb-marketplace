@@ -40,6 +40,11 @@ export const projectUpdateSchema = z.object({
 export const projectDetailSchema = projectSummarySchema.extend({
   content: z.string().nullable(),
   members: z.array(z.string()),
+  teamNames: z.array(z.string()),
+  initiatives: z.array(
+    z.object({ id: z.string(), name: z.string(), color: z.string().nullable(), status: z.string() }),
+  ),
+  links: z.array(z.object({ label: z.string(), url: z.string() })),
   milestones: z.array(
     z.object({ id: z.string(), name: z.string(), targetDate: z.string().nullable(), progress: z.number() }),
   ),
@@ -69,6 +74,9 @@ export const PROJECT_QUERY = `query Project($id: String!) {
     ${PROJECT_SUMMARY_FIELDS}
     content
     members(first: 50) { nodes { name } }
+    teamNames: teams(first: 10) { nodes { name } }
+    initiatives(first: 10) { nodes { id name color status } }
+    externalLinks(first: 20) { nodes { label url } }
     projectMilestones(first: 50) { nodes { id name targetDate progress sortOrder } }
     projectUpdates(first: 30) { nodes { id body health createdAt editedAt url user { id name } } }
   }
@@ -83,6 +91,9 @@ type RawProject = Omit<ProjectSummary, "teams"> & { teams: { nodes: { key: strin
 type RawProjectDetail = RawProject & {
   content: string | null;
   members: { nodes: { name: string }[] };
+  teamNames: { nodes: { name: string }[] };
+  initiatives: { nodes: ProjectDetail["initiatives"] };
+  externalLinks: { nodes: { label: string; url: string }[] };
   projectMilestones: { nodes: { id: string; name: string; targetDate: string | null; progress: number; sortOrder: number }[] };
   projectUpdates: {
     nodes: { id: string; body: string; health: ProjectDetail["health"]; createdAt: string; editedAt: string | null; url: string; user: { id: string; name: string } | null }[];
@@ -102,6 +113,9 @@ export function flattenProjectDetail(raw: RawProjectDetail): ProjectDetail {
     ...flattenProject(raw),
     content: raw.content,
     members: raw.members.nodes.map((member) => member.name),
+    teamNames: raw.teamNames.nodes.map((team) => team.name),
+    initiatives: raw.initiatives.nodes,
+    links: raw.externalLinks.nodes,
     milestones: raw.projectMilestones.nodes
       .slice()
       .sort((a, b) => a.sortOrder - b.sortOrder)
