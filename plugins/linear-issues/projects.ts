@@ -16,6 +16,8 @@ export const projectSummarySchema = z.object({
   status: projectStatusSchema,
   health: projectHealthSchema,
   progress: z.number(),
+  priority: z.number(),
+  priorityLabel: z.string(),
   startDate: z.string().nullable(),
   targetDate: z.string().nullable(),
   updatedAt: z.string(),
@@ -51,8 +53,8 @@ export const filterOptionsSchema = z.object({
 });
 export type FilterOptions = z.infer<typeof filterOptionsSchema>;
 
-const PROJECT_SUMMARY_FIELDS = `
-  id name description icon color url health progress startDate targetDate updatedAt
+export const PROJECT_SUMMARY_FIELDS = `
+  id name description icon color url health progress priority priorityLabel startDate targetDate updatedAt
   status { id name type color }
   lead { id name }
   teams(first: 10) { nodes { key } }

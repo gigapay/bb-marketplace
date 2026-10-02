@@ -32,7 +32,7 @@ export function LinearMarkdown({ content }: { content: string }) {
       event.preventDefault();
       event.stopPropagation();
       navigate.toPluginPanel("issues", {
-        subPath: linear.kind === "issue" ? linear.identifier : `projects/${linear.id}`,
+        subPath: linear.kind === "issue" ? linear.identifier : linear.kind === "project" ? `projects/${linear.id}` : `initiatives/${linear.id}`,
       });
       return;
     }

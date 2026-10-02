@@ -20,6 +20,14 @@ import {
   type IssueFilters,
 } from "./projects.js";
 import {
+  INITIATIVES_QUERY,
+  INITIATIVE_QUERY,
+  flattenInitiative,
+  flattenInitiativeDetail,
+  initiativeDetailSchema,
+  initiativeSummarySchema,
+} from "./initiatives.js";
+import {
   PROJECT_MILESTONES_QUERY,
   createWriter,
   issueCreateSchema,
@@ -243,6 +251,8 @@ export const rpcContract = defineRpcContract({
     input: z.object({ mine: z.boolean(), includeClosed: z.boolean() }).strict(),
     output: z.object({ projects: z.array(projectSummarySchema) }),
   },
+  initiatives_list: { input: z.null(), output: z.object({ initiatives: z.array(initiativeSummarySchema) }) },
+  initiative_get: { input: z.object({ id: z.string().min(1).max(100) }).strict(), output: initiativeDetailSchema },
   project_get: {
     input: z.object({ id: z.string().min(1).max(100) }).strict(),
     output: projectDetailSchema,
@@ -962,6 +972,15 @@ export default async function plugin(bb: BbPluginApi) {
         await bb.sdk.threads.stop({ threadId: draftThreadId }).catch(() => undefined);
       }
       return { url: data.projectUpdateCreate.projectUpdate?.url ?? null };
+    },
+    initiatives_list: async () => {
+      const data = await linear<{ initiatives: { nodes: Parameters<typeof flattenInitiative>[0][] } }>(INITIATIVES_QUERY, { filter: null });
+      return { initiatives: data.initiatives.nodes.map(flattenInitiative) };
+    },
+    initiative_get: async ({ id }) => {
+      const data = await linear<{ initiative: Parameters<typeof flattenInitiativeDetail>[0] | null }>(INITIATIVE_QUERY, { id });
+      if (data.initiative === null) throw new Error("Initiative not found");
+      return flattenInitiativeDetail(data.initiative);
     },
     project_get: async ({ id }) => {
       const data = await linear<{ project: Parameters<typeof flattenProjectDetail>[0] | null }>(PROJECT_QUERY, { id });

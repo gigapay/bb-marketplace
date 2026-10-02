@@ -37,7 +37,8 @@
     "projects.ts",
     "updates",
     "writes.ts",
-    "cli.ts"
+    "cli.ts",
+    "initiatives.ts"
   ],
   "exclude": [
     "**/*.test.ts",

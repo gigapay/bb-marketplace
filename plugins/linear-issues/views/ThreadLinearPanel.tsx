@@ -13,6 +13,7 @@ import { readPanelTarget, type LinearTarget } from "../shared/linear-url";
 import { SOURCE_LABELS, useIssueLinks } from "./links";
 import { CommentThreads } from "./Comments";
 import { ProjectDetailView } from "./Projects";
+import { InitiativeDetailView } from "./Initiatives";
 import { IssuePickerDialog } from "./pickers";
 import { EmptyState, ErrorLine, LabelChip, PriorityIcon, StateIcon, errorText } from "./shared";
 
@@ -31,7 +32,11 @@ export function openLinearTarget(navigate: Navigate, target: LinearTarget, threa
       ? navigate.openThreadPanel({ actionId: THREAD_PANEL_ACTION_ID, title: target.identifier })
       : navigate.openThreadPanel({ actionId: THREAD_PANEL_ACTION_ID, title: target.identifier, params: target });
   }
-  return navigate.openThreadPanel({ actionId: THREAD_PANEL_ACTION_ID, title: "Project", params: target });
+  return navigate.openThreadPanel({
+    actionId: THREAD_PANEL_ACTION_ID,
+    title: target.kind === "project" ? "Project" : "Initiative",
+    params: target,
+  });
 }
 
 /**
@@ -41,7 +46,20 @@ export function openLinearTarget(navigate: Navigate, target: LinearTarget, threa
 export function ThreadLinearPanel({ threadId, params }: PluginThreadPanelProps) {
   const target = readPanelTarget(params);
   if (target?.kind === "project") return <ProjectInPanel threadId={threadId} projectId={target.id} />;
+  if (target?.kind === "initiative") return <InitiativeInPanel initiativeId={target.id} />;
   return <IssuePanel threadId={threadId} issue={target?.kind === "issue" ? target.identifier : null} />;
+}
+
+/** An initiative opened from a link in the thread, in its own tab. */
+function InitiativeInPanel({ initiativeId }: { initiativeId: string }) {
+  const navigate = useBbNavigate();
+  return (
+    <InitiativeDetailView
+      initiativeId={initiativeId}
+      onOpenProject={(id) => openLinearTarget(navigate, { kind: "project", id }, null)}
+      onOpenInitiative={(id) => openLinearTarget(navigate, { kind: "initiative", id }, null)}
+    />
+  );
 }
 
 /** A project opened from a link in the thread, in its own tab. */

@@ -1,11 +1,15 @@
 // Recognizes links to Linear issues and projects so the plugin can open them
 // in BB (thread side panel or the Linear page) instead of the browser.
 
-export type LinearTarget = { kind: "issue"; identifier: string } | { kind: "project"; id: string };
+export type LinearTarget =
+  | { kind: "issue"; identifier: string }
+  | { kind: "project"; id: string }
+  | { kind: "initiative"; id: string };
 
 const ISSUE_PATH = /^\/[^/]+\/issue\/([A-Za-z][A-Za-z0-9]{0,9}-\d{1,7})(?:\/|$)/;
 // Project URLs end their slug with the project's slugId: `my-project-8bb10d790123`.
 const PROJECT_PATH = /^\/[^/]+\/project\/(?:[^/]*-)?([0-9a-f]{8,})(?:\/|$)/i;
+const INITIATIVE_PATH = /^\/[^/]+\/initiative\/(?:[^/]*-)?([0-9a-f]{8,})(?:\/|$)/i;
 
 export function parseLinearUrl(href: string): LinearTarget | null {
   let url: URL;
@@ -19,6 +23,8 @@ export function parseLinearUrl(href: string): LinearTarget | null {
   if (issue) return { kind: "issue", identifier: issue[1]!.toUpperCase() };
   const project = PROJECT_PATH.exec(url.pathname);
   if (project) return { kind: "project", id: project[1]!.toLowerCase() };
+  const initiative = INITIATIVE_PATH.exec(url.pathname);
+  if (initiative) return { kind: "initiative", id: initiative[1]!.toLowerCase() };
   return null;
 }
 
@@ -28,5 +34,6 @@ export function readPanelTarget(params: unknown): LinearTarget | null {
   const value = params as { kind?: unknown; identifier?: unknown; id?: unknown };
   if (value.kind === "issue" && typeof value.identifier === "string") return { kind: "issue", identifier: value.identifier };
   if (value.kind === "project" && typeof value.id === "string") return { kind: "project", id: value.id };
+  if (value.kind === "initiative" && typeof value.id === "string") return { kind: "initiative", id: value.id };
   return null;
 }
