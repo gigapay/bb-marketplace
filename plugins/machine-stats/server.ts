@@ -7,17 +7,20 @@
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import {
+  cleanupStatusSchema,
   destroyResultSchema,
   hostContract,
   listingSchema,
   slugSchema,
+  repoSchema,
   snapshotSchema,
+  type CleanupStatus,
   type MachineSnapshot,
   type Stack,
   type StackListing,
 } from "./contract.js";
 
-export type { MachineSnapshot, Stack, StackListing };
+export type { CleanupStatus, MachineSnapshot, Stack, StackListing };
 
 // A null hostId reads the server machine.
 const hostIdSchema = z.string().min(1).max(200).nullable();
@@ -35,12 +38,24 @@ export const rpcContract = defineRpcContract({
     input: z.object({ hostId: hostIdSchema, slug: slugSchema }),
     output: destroyResultSchema,
   },
+  cleanup_status: {
+    input: z.object({
+      hostId: hostIdSchema,
+      slugs: z.array(slugSchema).max(50),
+      // Skip the cache, for an explicit refresh.
+      fresh: z.boolean().optional(),
+    }),
+    output: z.array(cleanupStatusSchema),
+  },
 });
 
 const SNAPSHOT_TIMEOUT_MS = 15_000;
 const LIST_TIMEOUT_MS = 20_000;
 // Two sequential `compose down`s, each capped at three minutes on the host.
 const DESTROY_TIMEOUT_MS = 400_000;
+const CLEANUP_TIMEOUT_MS = 90_000;
+// Tickets and PRs move slowly, and each lookup costs a few API calls.
+const CLEANUP_CACHE_MS = 5 * 60_000;
 
 function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -53,17 +68,45 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
+function parseRepos(value: string): string[] {
+  return value
+    .split(",")
+    .map((repo) => repo.trim())
+    .filter(Boolean);
+}
+
 const percent = (used: number, total: number) =>
   total > 0 ? `${((used / total) * 100).toFixed(0)}%` : "n/a";
 
-function stackLine(stack: Stack): string {
+function stackLine(stack: Stack, cleanup?: CleanupStatus): string {
   const running = stack.containers.filter((c) => c.state === "running").length;
   const hosts = stack.hosts.length > 0 ? stack.hosts.join(" ") : "no traefik host";
-  return `${stack.id}  ${running}/${stack.containers.length} running  ${hosts}`;
+  const line = `${stack.id}  ${running}/${stack.containers.length} running  ${hosts}`;
+  if (cleanup === undefined) return line;
+  const verdict = cleanup.verdict === "ready" ? "READY TO DESTROY" : cleanup.verdict;
+  const worktree = cleanup.worktreeMissing ? " Worktree is gone." : "";
+  return `${line}\n    ${verdict}: ${cleanup.reason}${worktree}`;
 }
 
 export default async function plugin(bb: BbPluginApi) {
+  const settings = bb.settings.define({
+    githubRepos: {
+      type: "string",
+      label: "GitHub repositories",
+      description:
+        "Comma-separated owner/name repositories searched for a slug's pull requests when checking whether it can be destroyed.",
+      default: "gigapay/gigapay, gigapay/gigapay-app",
+      experimental_schema: z
+        .string()
+        .max(1000)
+        .refine(
+          (value) => parseRepos(value).every((repo) => repoSchema.safeParse(repo).success),
+          "Use owner/name, separated by commas",
+        ),
+    },
+  });
   const host = bb.hosts.experimental_client({ contract: hostContract });
+  const cleanupCache = new Map<string, { status: CleanupStatus; at: number }>();
 
   async function listMachines() {
     const [hosts, config] = await Promise.all([
@@ -115,17 +158,45 @@ export default async function plugin(bb: BbPluginApi) {
     );
   }
 
+  async function cleanupStatus(
+    hostId: string | null,
+    slugs: string[],
+    fresh = false,
+  ): Promise<CleanupStatus[]> {
+    const target = await resolveHostId(hostId);
+    const key = (slug: string) => `${target}:${slug}`;
+    const now = Date.now();
+    const stale = slugs.filter((slug) => {
+      const hit = cleanupCache.get(key(slug));
+      return fresh || hit === undefined || now - hit.at > CLEANUP_CACHE_MS;
+    });
+    if (stale.length > 0) {
+      const { githubRepos } = await settings.get();
+      const fetched = await host.call(
+        "cleanup_status",
+        { slugs: stale, repos: parseRepos(String(githubRepos ?? "")) },
+        { hostId: target, signal: AbortSignal.timeout(CLEANUP_TIMEOUT_MS) },
+      );
+      for (const status of fetched) cleanupCache.set(key(status.slug), { status, at: now });
+    }
+    return slugs.flatMap((slug) => {
+      const hit = cleanupCache.get(key(slug));
+      return hit === undefined ? [] : [hit.status];
+    });
+  }
+
   bb.rpc.register(rpcContract, {
     machine_snapshot: ({ hostId }) => snapshot(hostId),
     list_stacks: ({ hostId }) => listStacks(hostId),
     destroy_stack: ({ hostId, slug }) => destroyStack(hostId, slug),
+    cleanup_status: ({ hostId, slugs, fresh }) => cleanupStatus(hostId, slugs, fresh),
   });
 
   const usage = [
     "Usage:",
     "  bb machine-stats machines [--json]",
     "  bb machine-stats show [<host-id>] [--json]",
-    "  bb machine-stats stacks [--host <host-id>] [--json]",
+    "  bb machine-stats stacks [--cleanup] [--host <host-id>] [--json]",
     "  bb machine-stats destroy <slug> --yes [--host <host-id>] [--json]",
   ].join("\n");
 
@@ -145,8 +216,9 @@ export default async function plugin(bb: BbPluginApi) {
       },
       {
         name: "stacks",
-        summary: "List staging slugs and Traefik-exposed services (defaults to the server machine)",
-        usage: "bb machine-stats stacks [--host <host-id>] [--json]",
+        summary:
+          "List staging slugs and Traefik-exposed services (defaults to the server machine); --cleanup flags slugs whose Linear ticket is done and PRs merged",
+        usage: "bb machine-stats stacks [--cleanup] [--host <host-id>] [--json]",
       },
       {
         name: "destroy",
@@ -164,6 +236,7 @@ export default async function plugin(bb: BbPluginApi) {
       };
       const json = take("--json");
       const yes = take("--yes");
+      const withCleanup = take("--cleanup");
       let hostId: string | null = null;
       const hostIndex = args.indexOf("--host");
       if (hostIndex !== -1) {
@@ -205,17 +278,24 @@ export default async function plugin(bb: BbPluginApi) {
         case "stacks": {
           if (rest.length > 0) break;
           const listing = await listStacks(hostId);
-          if (json) return { exitCode: 0, stdout: JSON.stringify(listing) };
           if (listing.dockerError !== null) {
+            if (json) return { exitCode: 0, stdout: JSON.stringify(listing) };
             return { exitCode: 1, stderr: `docker unavailable on ${listing.hostname}: ${listing.dockerError}` };
           }
           const staging = listing.stacks.filter((s) => s.kind === "staging");
+          const cleanup = withCleanup
+            ? await cleanupStatus(hostId, staging.map((s) => s.id), true)
+            : [];
+          if (json) {
+            const stdout = withCleanup ? JSON.stringify({ ...listing, cleanup }) : JSON.stringify(listing);
+            return { exitCode: 0, stdout };
+          }
           const services = listing.stacks.filter((s) => s.kind === "service");
           const lines = [
             `${listing.hostname}`,
             "",
             "Staging slugs:",
-            ...(staging.length === 0 ? ["  none"] : staging.map((s) => `  ${stackLine(s)}`)),
+            ...(staging.length === 0 ? ["  none"] : staging.map((s) => `  ${stackLine(s, cleanup.find((c) => c.slug === s.id))}`)),
             "",
             "Other Traefik services:",
             ...(services.length === 0 ? ["  none"] : services.map((s) => `  ${stackLine(s)}`)),
