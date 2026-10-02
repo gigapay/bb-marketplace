@@ -1,29 +1,16 @@
-// Traefik stacks card in the sidebar footer, next to Usage Bar and Machine
-// stats: the staging slugs and Traefik services running on the open thread's
-// machine (or the server), with a destroy button per slug.
-import { useCallback, useEffect, useState } from "react";
-import {
-  definePluginApp,
-  experimental_useSidebarThreads,
-  UrlLink,
-  useBbContext,
-  useRpc,
-} from "@get-bb/plugin-sdk/app";
-import type { rpcContract, Stack, StackListing } from "./server";
+// Bottom of the Machine card: the staging slugs and Traefik services running
+// on the machine's docker engine, with a destroy button per slug.
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { UrlLink, useRpc } from "@get-bb/plugin-sdk/app";
+import type { CleanupStatus, rpcContract, Stack, StackListing } from "./server";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 
 // The card only mounts while the disclosure is open, so polling costs nothing
 // when it's closed.
 const POLL_INTERVAL_MS = 10_000;
-
-/** The open thread's machine, or null (the server machine) when there's none. */
-function useSelectedMachine(): { hostId: string | null; name: string | null } {
-  const { threadId } = useBbContext();
-  const { threads } = experimental_useSidebarThreads();
-  const host = threads.find((thread) => thread.id === threadId)?.host ?? null;
-  return host === null ? { hostId: null, name: null } : { hostId: host.id, name: host.name };
-}
+// The server caches ticket and PR lookups for five minutes anyway.
+const CLEANUP_INTERVAL_MS = 5 * 60_000;
 
 function useListing(hostId: string | null) {
   const rpc = useRpc<typeof rpcContract>();
@@ -67,7 +54,75 @@ function useListing(hostId: string | null) {
     };
   }, [rpc, hostId, nonce]);
 
-  return { listing, error, refresh };
+  return { listing, error, refresh, nonce };
+}
+
+/** Which slugs are done in Linear with their PRs merged, keyed by slug. */
+function useCleanup(hostId: string | null, slugs: string[], nonce: number) {
+  const rpc = useRpc<typeof rpcContract>();
+  const [statuses, setStatuses] = useState<Map<string, CleanupStatus>>(new Map());
+  const lastNonce = useRef(nonce);
+  const slugKey = slugs.join(",");
+
+  useEffect(() => {
+    setStatuses(new Map());
+  }, [hostId]);
+
+  useEffect(() => {
+    const ids = slugKey === "" ? [] : slugKey.split(",");
+    if (ids.length === 0) return;
+    // A manual refresh also skips the server's cache.
+    const fresh = lastNonce.current !== nonce;
+    lastNonce.current = nonce;
+    let cancelled = false;
+    const load = (skipCache: boolean) => {
+      if (document.visibilityState === "hidden") return;
+      rpc.call("cleanup_status", { hostId, slugs: ids, fresh: skipCache }).then(
+        (next) => {
+          if (!cancelled) setStatuses(new Map(next.map((status) => [status.slug, status])));
+        },
+        // Best effort: the rows just go without a badge.
+        () => {},
+      );
+    };
+    load(fresh);
+    const timer = window.setInterval(() => load(false), CLEANUP_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [rpc, hostId, slugKey, nonce]);
+
+  return statuses;
+}
+
+function CleanupBadge({ cleanup }: { cleanup: CleanupStatus | undefined }) {
+  // No ticket in the slug, or a failed lookup: nothing worth showing.
+  if (cleanup === undefined || cleanup.verdict === "unknown") return null;
+  const title = [cleanup.reason, cleanup.worktreeMissing ? "Its worktree is gone." : null]
+    .filter(Boolean)
+    .join(" ");
+  if (cleanup.verdict === "ready") {
+    return (
+      <span
+        title={`Safe to destroy: ${title}`}
+        className="shrink-0 rounded bg-success/15 px-1 text-2xs leading-4 text-success"
+      >
+        done
+      </span>
+    );
+  }
+  if (cleanup.worktreeMissing) {
+    return (
+      <span
+        title={title}
+        className="shrink-0 rounded bg-warning/15 px-1 text-2xs leading-4 text-warning"
+      >
+        no worktree
+      </span>
+    );
+  }
+  return null;
 }
 
 function formatAge(createdAt: number | null): string | null {
@@ -132,10 +187,12 @@ type DestroyState =
 function StagingRow({
   stack,
   hostId,
+  cleanup,
   onDestroyed,
 }: {
   stack: Stack;
   hostId: string | null;
+  cleanup: CleanupStatus | undefined;
   onDestroyed: () => void;
 }) {
   const rpc = useRpc<typeof rpcContract>();
@@ -171,6 +228,7 @@ function StagingRow({
         >
           {stack.id}
         </span>
+        <CleanupBadge cleanup={cleanup} />
         <span className="shrink-0 text-2xs tabular-nums text-subtle-foreground" title={status.label}>
           {stack.containers.filter((c) => c.state === "running").length}/{stack.containers.length}
           {age !== null ? ` · ${age}` : ""}
@@ -245,97 +303,106 @@ function ServiceRow({ stack }: { stack: Stack }) {
   );
 }
 
-function SectionTitle({ children }: { children: string }) {
+function SectionTitle({ children, actions }: { children: string; actions?: ReactNode }) {
   return (
-    <p className="px-1 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
-      {children}
-    </p>
+    <div className="flex min-w-0 items-center gap-1 px-1">
+      <p className="min-w-0 flex-1 truncate text-2xs font-medium uppercase tracking-wide text-muted-foreground">
+        {children}
+      </p>
+      {actions}
+    </div>
   );
 }
 
-function TraefikStacks() {
-  const machine = useSelectedMachine();
-  const { listing, error, refresh } = useListing(machine.hostId);
+export function TraefikStacks({ hostId }: { hostId: string | null }) {
+  const { listing, error, refresh, nonce } = useListing(hostId);
+  const slugs =
+    listing?.stacks.filter((s) => s.kind === "staging").map((s) => s.id) ?? [];
+  const cleanup = useCleanup(hostId, slugs, nonce);
+
+  const actions = (
+    <>
+      {error !== null ? (
+        <span title={error} className="flex shrink-0 items-center text-warning">
+          <Icon name="TriangleAlert" aria-label="Last refresh failed" className="size-3" />
+        </span>
+      ) : null}
+      <button
+        type="button"
+        onClick={refresh}
+        aria-label="Refresh slugs"
+        title="Refresh slugs"
+        className="shrink-0 rounded p-0.5 text-subtle-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+      >
+        <Icon name="RefreshCw" aria-hidden className="size-3" />
+      </button>
+    </>
+  );
 
   if (listing === null) {
     return (
-      <p className="px-2.5 py-2 text-2xs text-muted-foreground">
-        {error ?? "Reading docker stacks…"}
-      </p>
+      <div className="flex flex-col gap-0.5 px-1.5 py-2">
+        <SectionTitle actions={actions}>Staging slugs</SectionTitle>
+        <p className="px-1 text-2xs text-muted-foreground">
+          {error ?? "Reading docker stacks…"}
+        </p>
+      </div>
+    );
+  }
+
+  if (listing.dockerError !== null) {
+    return (
+      <div className="flex flex-col gap-0.5 px-1.5 py-2">
+        <SectionTitle actions={actions}>Staging slugs</SectionTitle>
+        <p className="px-1 text-2xs text-muted-foreground" title={listing.dockerError}>
+          Docker isn't reachable on this machine.
+        </p>
+      </div>
     );
   }
 
   const staging = listing.stacks.filter((s) => s.kind === "staging");
   const services = listing.stacks.filter((s) => s.kind === "service");
-  const status = [
-    machine.name ?? listing.hostname,
-    `${staging.length} slug${staging.length === 1 ? "" : "s"}`,
-  ].join(" · ");
+  const done = staging.filter((s) => cleanup.get(s.id)?.verdict === "ready").length;
 
   return (
-    <div className="flex flex-col gap-2 px-1.5 py-2">
-      {listing.dockerError !== null ? (
-        <p className="px-1 text-2xs text-muted-foreground" title={listing.dockerError}>
-          Docker isn't reachable on this machine.
-        </p>
-      ) : (
-        <div className="flex max-h-96 flex-col gap-2 overflow-y-auto">
-          <div className="flex flex-col gap-0.5">
-            <SectionTitle>Staging slugs</SectionTitle>
-            {staging.length === 0 ? (
-              <p className="px-1 text-2xs text-subtle-foreground">No staging stacks running.</p>
-            ) : (
-              <ul className="flex flex-col">
-                {staging.map((stack) => (
-                  <StagingRow
-                    key={stack.id}
-                    stack={stack}
-                    hostId={machine.hostId}
-                    onDestroyed={refresh}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-          {services.length > 0 ? (
-            <div className="flex flex-col gap-0.5">
-              <SectionTitle>Other services</SectionTitle>
-              <ul className="flex flex-col">
-                {services.map((stack) => (
-                  <ServiceRow key={stack.id} stack={stack} />
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </div>
-      )}
-      <div className="flex items-center gap-1 px-1 text-2xs text-subtle-foreground">
-        <span className="min-w-0 flex-1 truncate">{status}</span>
-        {error !== null ? (
-          <span title={error} className="flex shrink-0 items-center text-warning">
-            <Icon name="TriangleAlert" aria-label="Last refresh failed" className="size-3" />
-          </span>
-        ) : null}
-        <button
-          type="button"
-          onClick={refresh}
-          aria-label="Refresh"
-          title="Refresh"
-          className="shrink-0 rounded p-0.5 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-        >
-          <Icon name="RefreshCw" aria-hidden className="size-3" />
-        </button>
+    <div className="flex max-h-96 flex-col gap-2 overflow-y-auto px-1.5 py-2">
+      <div className="flex flex-col gap-0.5">
+        <SectionTitle actions={actions}>
+          {[
+            "Staging slugs",
+            staging.length > 0 ? String(staging.length) : null,
+            done > 0 ? `${done} done` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </SectionTitle>
+        {staging.length === 0 ? (
+          <p className="px-1 text-2xs text-subtle-foreground">No staging stacks running.</p>
+        ) : (
+          <ul className="flex flex-col">
+            {staging.map((stack) => (
+              <StagingRow
+                key={stack.id}
+                stack={stack}
+                hostId={hostId}
+                cleanup={cleanup.get(stack.id)}
+                onDestroyed={refresh}
+              />
+            ))}
+          </ul>
+        )}
       </div>
+      {services.length > 0 ? (
+        <div className="flex flex-col gap-0.5">
+          <SectionTitle>Other services</SectionTitle>
+          <ul className="flex flex-col">
+            {services.map((stack) => (
+              <ServiceRow key={stack.id} stack={stack} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }
-
-export default definePluginApp((app) => {
-  app.experimental_sidebarFooter.register({
-    kind: "disclosure",
-    id: "traefik-stacks",
-    label: "Traefik stacks",
-    icon: "Network",
-    component: TraefikStacks,
-  });
-});

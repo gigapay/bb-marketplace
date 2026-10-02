@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-machine-stats",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "engines": {
     "bb": ">=0.44",
@@ -8,9 +8,15 @@
   },
   "bb": {
     "name": "Machine Stats",
-    "description": "Live CPU, RAM and disk usage of the thread's machine in the sidebar footer.",
+    "description": "Live CPU, RAM and disk usage plus the staging slugs and Traefik services of the thread's machine, with one-click destroy, in the sidebar footer.",
     "branding": {
-      "icon": "Activity"
+      "icon": "./assets/server.svg",
+      "experimental_icons": {
+        "server": "./assets/server.svg",
+        "cpu": "./assets/cpu.svg",
+        "memory": "./assets/memory.svg",
+        "disk": "./assets/disk.svg"
+      }
     },
     "server": "./server.ts",
     "app": "./app.tsx",
@@ -46,5 +52,5 @@
     "tailwind-merge": "^3.4.0",
     "vaul": "^1.1.2"
   },
-  "description": "CPU, RAM and disk usage of the selected machine in the BB sidebar footer."
+  "description": "CPU, RAM, disk usage and staging slugs of the selected machine in the BB sidebar footer."
 }
