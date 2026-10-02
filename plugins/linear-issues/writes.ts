@@ -107,10 +107,14 @@ const PROJECT_DELETE = `mutation ProjectDelete($id: String!) { projectDelete(id:
 const UPDATE_CREATE = `mutation ProjectUpdateCreate($input: ProjectUpdateCreateInput!) { projectUpdateCreate(input: $input) { success projectUpdate { id url } } }`;
 const UPDATE_EDIT = `mutation ProjectUpdateEdit($id: String!, $input: ProjectUpdateUpdateInput!) { projectUpdateUpdate(id: $id, input: $input) { success projectUpdate { id url } } }`;
 const UPDATE_ARCHIVE = `mutation ProjectUpdateArchive($id: String!) { projectUpdateArchive(id: $id) { success } }`;
+const INITIATIVE_UPDATE_CREATE = `mutation InitiativeUpdateCreate($input: InitiativeUpdateCreateInput!) { initiativeUpdateCreate(input: $input) { success initiativeUpdate { id url } } }`;
+const INITIATIVE_UPDATE_EDIT = `mutation InitiativeUpdateEdit($id: String!, $input: InitiativeUpdateUpdateInput!) { initiativeUpdateUpdate(id: $id, input: $input) { success } }`;
+const INITIATIVE_UPDATE_ARCHIVE = `mutation InitiativeUpdateArchive($id: String!) { initiativeUpdateArchive(id: $id) { success } }`;
 
 export const ALL_WRITE_DOCUMENTS = [
   ...WRITE_OPTIONS_QUERIES, PROJECT_MILESTONES_QUERY, ISSUE_CREATE, ISSUE_UPDATE, ISSUE_ARCHIVE, COMMENT_CREATE, COMMENT_UPDATE,
   COMMENT_DELETE, PROJECT_CREATE, PROJECT_UPDATE, PROJECT_DELETE, UPDATE_CREATE, UPDATE_EDIT, UPDATE_ARCHIVE,
+  INITIATIVE_UPDATE_CREATE, INITIATIVE_UPDATE_EDIT, INITIATIVE_UPDATE_ARCHIVE,
 ];
 
 // Id-based inputs: what the UI sends, and what the CLI resolves names into.
@@ -220,6 +224,19 @@ export function createWriter(linear: Linear) {
     },
     async archiveUpdate(updateId: string): Promise<void> {
       await ok(linear<Record<string, { success: boolean }>>(UPDATE_ARCHIVE, { id: updateId }), "project update archive");
+    },
+    async postInitiativeUpdate(initiativeId: string, body: string, health: string): Promise<Result> {
+      const { initiativeUpdate } = await ok(
+        linear<Record<string, { success: boolean; initiativeUpdate: { id: string; url: string } }>>(INITIATIVE_UPDATE_CREATE, { input: { initiativeId, body, health } }),
+        "initiative update",
+      );
+      return { id: initiativeUpdate.id, url: initiativeUpdate.url, label: "initiative update" };
+    },
+    async editInitiativeUpdate(updateId: string, input: { body?: string; health?: string }): Promise<void> {
+      await ok(linear<Record<string, { success: boolean }>>(INITIATIVE_UPDATE_EDIT, { id: updateId, input }), "initiative update edit");
+    },
+    async archiveInitiativeUpdate(updateId: string): Promise<void> {
+      await ok(linear<Record<string, { success: boolean }>>(INITIATIVE_UPDATE_ARCHIVE, { id: updateId }), "initiative update archive");
     },
   };
 }

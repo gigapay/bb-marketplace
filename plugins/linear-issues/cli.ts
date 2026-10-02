@@ -1,10 +1,12 @@
 // The `bb linear` CLI agents use from threads: read issues and
-// projects, and write issues, comments, projects and project updates.
+// projects, and write issues, comments, projects, initiatives' and
+// projects' updates.
 // Names are accepted everywhere ids are ("In Progress", "me", "Bug").
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { groupCommentThreads } from "./shared/comments.js";
 import { IDENTIFIER_PATTERN } from "./shared/links.js";
 import { PROJECTS_QUERY, PROJECT_QUERY, flattenProject, flattenProjectDetail, type ProjectDetail, type ProjectSummary } from "./projects.js";
+import { INITIATIVES_QUERY, INITIATIVE_QUERY, flattenInitiative, flattenInitiativeDetail, type InitiativeDetail, type InitiativeSummary } from "./initiatives.js";
 import { PROJECT_MILESTONES_QUERY, createWriter, loadWriteOptions, resolver, type WriteOptions } from "./writes.js";
 import type { IssueDetail, IssueSummary } from "./server.js";
 
@@ -87,12 +89,32 @@ function formatProject(project: ProjectDetail): string {
     `Status: ${project.status?.name ?? "—"} · Health: ${project.health ?? "—"} · Progress: ${Math.round(project.progress * 100)}%`,
     `Lead: ${project.lead?.name ?? "—"} · ${project.startDate ?? "…"} → ${project.targetDate ?? "…"}`,
   ];
+  if (project.initiatives.length) lines.push(`Initiatives: ${project.initiatives.map((i) => `${i.name} [initiative ${i.id}]`).join(", ")}`);
+  if (project.links.length) lines.push(`Resources: ${project.links.map((l) => `${l.label || l.url} <${l.url}>`).join(", ")}`);
   if (project.description) lines.push(`Summary: ${project.description}`);
   if (project.milestones.length) {
     lines.push("", "Milestones:", ...project.milestones.map((m) => `- ${m.name} (${Math.round(m.progress * 100)}%${m.targetDate ? `, ${m.targetDate}` : ""})`));
   }
   lines.push("", project.content?.trim() || "(no description)");
   for (const update of project.updates.slice(0, 5)) {
+    lines.push("", `--- Update by ${update.author} (${update.createdAt}) · ${update.health ?? "no health"} [update ${update.id}]`, update.body);
+  }
+  return lines.join("\n");
+}
+
+function formatInitiative(initiative: InitiativeDetail): string {
+  const lines = [
+    `${initiative.name} [initiative ${initiative.id}]`,
+    `URL: ${initiative.url}`,
+    `Status: ${initiative.status} · Health: ${initiative.health ?? "—"} · Owner: ${initiative.owner?.name ?? "—"} · Target: ${initiative.targetDate ?? "—"}`,
+  ];
+  if (initiative.parent) lines.push(`Parent: ${initiative.parent.name}`);
+  if (initiative.description) lines.push(`Summary: ${initiative.description}`);
+  if (initiative.projects.length) {
+    lines.push("", "Projects:", ...initiative.projects.map((p) => `- ${p.name} (${p.status?.name ?? "—"} · ${p.health ?? "no health"} · ${Math.round(p.progress * 100)}%)`));
+  }
+  lines.push("", initiative.content?.trim() || "(no description)");
+  for (const update of initiative.updates.slice(0, 5)) {
     lines.push("", `--- Update by ${update.author} (${update.createdAt}) · ${update.health ?? "no health"} [update ${update.id}]`, update.body);
   }
   return lines.join("\n");
@@ -128,6 +150,13 @@ Projects and updates
   update-post <project> --health onTrack|atRisk|offTrack <markdown>
   update-edit <update id> [--health <h>] [<markdown>]
   update-archive <update id>
+
+Initiatives and updates
+  initiatives [--all]                    Active, planned and proposed initiatives (--all: including closed)
+  initiative <name|id>                   Initiative with its projects and recent updates (with update ids)
+  initiative-update-post <initiative> --health onTrack|atRisk|offTrack <markdown>
+  initiative-update-edit <update id> [--health <h>] [<markdown>]
+  initiative-update-archive <update id>
 
 This thread
   current                                Issue linked to this thread
@@ -166,11 +195,22 @@ export function registerCli(bb: BbPluginApi, deps: CliDeps) {
     throw new Error(`Unknown milestone "${value}". Milestones: ${milestones.map((m) => m.name).join(", ") || "none"}`);
   }
 
+  async function findInitiative(value: string): Promise<InitiativeSummary> {
+    const data = await deps.linear<{ initiatives: { nodes: Parameters<typeof flattenInitiative>[0][] } }>(INITIATIVES_QUERY, { filter: null });
+    const initiatives = data.initiatives.nodes.map(flattenInitiative);
+    const wanted = value.trim().toLowerCase();
+    const exact = initiatives.filter((i) => i.id === value || i.name.toLowerCase() === wanted);
+    const partial = exact.length ? exact : initiatives.filter((i) => i.name.toLowerCase().includes(wanted));
+    if (partial.length === 1) return partial[0]!;
+    const choices = (partial.length ? partial : initiatives).slice(0, 12).map((i) => i.name).join(", ");
+    throw new Error(`${partial.length ? "Ambiguous" : "Unknown"} initiative "${value}". Choose one of: ${choices}`);
+  }
+
   const done = (json: boolean, value: unknown, message: string) => ({ exitCode: 0, stdout: bounded(json ? JSON.stringify(value) : message) });
 
   const cli: Parameters<typeof bb.cli.register>[0] = {
     name: "linear",
-    summary: "Read and write your Linear issues, comments, projects and project updates",
+    summary: "Read and write your Linear issues, comments, projects, initiatives and their updates",
     commands: [
       { name: "list", summary: "List your open assigned issues", usage: "bb linear list [--json]" },
       { name: "show", summary: "Show an issue with its comments", usage: "bb linear show <ID> [--json]" },
@@ -188,6 +228,11 @@ export function registerCli(bb: BbPluginApi, deps: CliDeps) {
       { name: "update-post", summary: "Post a project update", usage: "bb linear update-post <project> --health <h> <markdown>" },
       { name: "update-edit", summary: "Edit a project update", usage: "bb linear update-edit <update id> [--health <h>] [<markdown>]" },
       { name: "update-archive", summary: "Archive a project update", usage: "bb linear update-archive <update id>" },
+      { name: "initiatives", summary: "List initiatives", usage: "bb linear initiatives [--all]" },
+      { name: "initiative", summary: "Show an initiative", usage: "bb linear initiative <name|id>" },
+      { name: "initiative-update-post", summary: "Post an initiative update", usage: "bb linear initiative-update-post <initiative> --health <h> <markdown>" },
+      { name: "initiative-update-edit", summary: "Edit an initiative update", usage: "bb linear initiative-update-edit <update id> [--health <h>] [<markdown>]" },
+      { name: "initiative-update-archive", summary: "Archive an initiative update", usage: "bb linear initiative-update-archive <update id>" },
       { name: "current", summary: "Show the issue linked to this thread", usage: "bb linear current [--json]" },
       { name: "link", summary: "Link this thread to an issue", usage: "bb linear link <ID>" },
       { name: "unlink", summary: "Unlink this thread", usage: "bb linear unlink" },
@@ -384,6 +429,45 @@ export function registerCli(bb: BbPluginApi, deps: CliDeps) {
             if (!rest[0]) break;
             await writer.archiveUpdate(rest[0]);
             return done(json, { archived: rest[0] }, `Archived update ${rest[0]}.`);
+          }
+
+          case "initiatives": {
+            const data = await deps.linear<{ initiatives: { nodes: Parameters<typeof flattenInitiative>[0][] } }>(INITIATIVES_QUERY, { filter: null });
+            const all = parsed.switches.has("all");
+            const initiatives = data.initiatives.nodes.map(flattenInitiative).filter((i) => all || (i.status !== "Completed" && i.status !== "Canceled"));
+            const lines = initiatives.map((i) => `${i.name}  [${i.status} · ${i.health ?? "no health"} · ${i.projectCount} projects]  ${i.id}`);
+            return done(json, initiatives, lines.join("\n") || "No initiatives.");
+          }
+          case "initiative": {
+            if (!rest.length) break;
+            const summary = await findInitiative(rest.join(" "));
+            const data = await deps.linear<{ initiative: Parameters<typeof flattenInitiativeDetail>[0] }>(INITIATIVE_QUERY, { id: summary.id });
+            const initiative = flattenInitiativeDetail(data.initiative);
+            return done(json, initiative, formatInitiative(initiative));
+          }
+          case "initiative-update-post": {
+            known(parsed, ["health"]);
+            const [initiativeName, ...body] = rest;
+            const health = one(parsed, "health");
+            if (!initiativeName || !body.length || !health) break;
+            if (!["onTrack", "atRisk", "offTrack"].includes(health)) throw new Error("--health must be onTrack, atRisk or offTrack");
+            const initiative = await findInitiative(initiativeName);
+            const result = await writer.postInitiativeUpdate(initiative.id, text(body.join(" ")), health);
+            return done(json, result, `Posted an update on ${initiative.name}: ${result.url}`);
+          }
+          case "initiative-update-edit": {
+            known(parsed, ["health"]);
+            const [id, ...body] = rest;
+            const health = one(parsed, "health");
+            if (!id || (!body.length && !health)) break;
+            if (health && !["onTrack", "atRisk", "offTrack"].includes(health)) throw new Error("--health must be onTrack, atRisk or offTrack");
+            await writer.editInitiativeUpdate(id, { ...(body.length ? { body: text(body.join(" ")) } : {}), ...(health ? { health } : {}) });
+            return done(json, { edited: id }, `Edited initiative update ${id}.`);
+          }
+          case "initiative-update-archive": {
+            if (!rest[0]) break;
+            await writer.archiveInitiativeUpdate(rest[0]);
+            return done(json, { archived: rest[0] }, `Archived initiative update ${rest[0]}.`);
           }
 
           case "current":

@@ -21,33 +21,38 @@ const POLL_MS = 3_000;
 const POLL_LIMIT_MS = 6 * 60_000;
 
 type Stored = { body: string; health: Health; threadId: string | null };
-const storageKey = (projectId: string) => `linear-issues:update-draft:${projectId}`;
+/** What the update is posted on: projects and initiatives share this composer. */
+export type UpdateTarget = { kind: "project" | "initiative"; id: string };
 
-function readStored(projectId: string): Stored | null {
+// Project drafts keep their original key so drafts in progress survive.
+const storageKey = (target: UpdateTarget) =>
+  target.kind === "project" ? `linear-issues:update-draft:${target.id}` : `linear-issues:initiative-update-draft:${target.id}`;
+
+function readStored(target: UpdateTarget): Stored | null {
   try {
-    return JSON.parse(localStorage.getItem(storageKey(projectId)) ?? "null");
+    return JSON.parse(localStorage.getItem(storageKey(target)) ?? "null");
   } catch {
     return null;
   }
 }
 
 /**
- * Write a project update, or have an agent draft it from the project's
+ * Write a project or initiative update, or have an agent draft it from its
  * recent activity. The draft stays here (and survives reloads) until you
  * post it; nothing reaches Linear before that.
  */
 export function UpdateComposer({
-  projectId,
+  target,
   currentHealth,
   onPosted,
 }: {
-  projectId: string;
+  target: UpdateTarget;
   currentHealth: Health | null;
   onPosted: () => void;
 }) {
   const rpc = useRpc<typeof rpcContract>();
   const navigate = useBbNavigate();
-  const stored = readStored(projectId);
+  const stored = readStored(target);
   const [body, setBody] = useState(stored?.body ?? "");
   const [health, setHealth] = useState<Health>(stored?.health ?? currentHealth ?? "onTrack");
   const [threadId, setThreadId] = useState<string | null>(stored?.threadId ?? null);
@@ -58,9 +63,9 @@ export function UpdateComposer({
   const pollStarted = useRef(0);
 
   useEffect(() => {
-    if (body.trim() === "" && threadId === null) localStorage.removeItem(storageKey(projectId));
-    else localStorage.setItem(storageKey(projectId), JSON.stringify({ body, health, threadId } satisfies Stored));
-  }, [projectId, body, health, threadId]);
+    if (body.trim() === "" && threadId === null) localStorage.removeItem(storageKey(target));
+    else localStorage.setItem(storageKey(target), JSON.stringify({ body, health, threadId } satisfies Stored));
+  }, [target.kind, target.id, body, health, threadId]);
 
   // Poll the drafting thread until the agent answers.
   useEffect(() => {
@@ -113,7 +118,10 @@ export function UpdateComposer({
   const startDraft = async () => {
     if (body.trim() !== "" && !window.confirm("Replace the current text with a new draft from the agent?")) return;
     try {
-      const { threadId: id } = await rpc.call("update_draft_start", { projectId, notes });
+      const { threadId: id } =
+        target.kind === "project"
+          ? await rpc.call("update_draft_start", { projectId: target.id, notes })
+          : await rpc.call("initiative_update_draft_start", { initiativeId: target.id, notes });
       setThreadId(id);
       pollStarted.current = Date.now();
       setDrafting(true);
@@ -132,8 +140,12 @@ export function UpdateComposer({
     if (body.trim() === "" || posting) return;
     setPosting(true);
     try {
-      await rpc.call("project_update_create", { projectId, body, health, draftThreadId: threadId });
-      toast.success("Project update posted to Linear");
+      if (target.kind === "project") {
+        await rpc.call("project_update_create", { projectId: target.id, body, health, draftThreadId: threadId });
+      } else {
+        await rpc.call("initiative_update_create", { initiativeId: target.id, body, health, draftThreadId: threadId });
+      }
+      toast.success(`${target.kind === "project" ? "Project" : "Initiative"} update posted to Linear`);
       setBody("");
       setThreadId(null);
       setNotes("");
@@ -150,7 +162,7 @@ export function UpdateComposer({
     <section className="rounded-lg border border-border bg-card p-3">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <h3 className="mr-auto text-sm font-medium">New update</h3>
-        <div role="radiogroup" aria-label="Project health" className="flex gap-1">
+        <div role="radiogroup" aria-label={`${target.kind === "project" ? "Project" : "Initiative"} health`} className="flex gap-1">
           {HEALTH_OPTIONS.map((option) => (
             <button
               key={option.value}
@@ -232,8 +244,8 @@ export function UpdateComposer({
         <textarea
           value={body}
           onChange={(event) => setBody(event.target.value)}
-          placeholder="Where does the project stand? What shipped, what's next, any risks…"
-          aria-label="Project update"
+          placeholder={`Where does the ${target.kind} stand? What shipped, what's next, any risks…`}
+          aria-label={`${target.kind === "project" ? "Project" : "Initiative"} update`}
           rows={8}
           disabled={drafting}
           className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"

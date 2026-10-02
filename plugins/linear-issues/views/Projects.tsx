@@ -17,7 +17,7 @@ import { TriageDialog } from "./Triage";
 import { ProjectTriageDialog } from "./ProjectTriage";
 import { IssueFormDialog, ProjectFormDialog, type ProjectFormValues } from "./editing";
 import { toast } from "sonner";
-import { EmptyState, ErrorLine, errorText, relativeTime } from "./shared";
+import { EmptyState, ErrorLine, PriorityIcon, errorText, relativeTime } from "./shared";
 
 // Linear's own order for project statuses.
 const STATUS_ORDER = ["started", "planned", "backlog", "paused", "completed", "canceled"];
@@ -28,13 +28,27 @@ const HEALTH = {
   offTrack: { label: "Off track", className: "bg-red-500/15 text-red-700 dark:text-red-400" },
 } as const;
 
-function HealthBadge({ health }: { health: ProjectSummary["health"] }) {
+export function HealthBadge({ health }: { health: ProjectSummary["health"] }) {
   if (health === null) return null;
   const { label, className } = HEALTH[health];
   return <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", className)}>{label}</span>;
 }
 
-function StatusBadge({ status }: { status: ProjectSummary["status"] }) {
+/** A labelled line of the project header, like Linear's property rows. */
+function PropertyRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+      <dt className="w-20 shrink-0 text-xs text-muted-foreground">{label}</dt>
+      <dd className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1.5">{children}</dd>
+    </div>
+  );
+}
+
+function InitiativeDot({ color }: { color: string | null }) {
+  return <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ background: color ?? "#5e6ad2" }} />;
+}
+
+export function StatusBadge({ status }: { status: ProjectSummary["status"] }) {
   if (status === null) return null;
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -44,7 +58,7 @@ function StatusBadge({ status }: { status: ProjectSummary["status"] }) {
   );
 }
 
-function ProgressBar({ value, color }: { value: number; color: string }) {
+export function ProgressBar({ value, color }: { value: number; color: string }) {
   const percent = Math.round(Math.min(1, Math.max(0, value)) * 100);
   return (
     <span className="inline-flex shrink-0 items-center gap-2 text-xs text-muted-foreground" aria-label={`${percent}% done`}>
@@ -56,7 +70,7 @@ function ProgressBar({ value, color }: { value: number; color: string }) {
   );
 }
 
-function ProjectMark({ project, className }: { project: Pick<ProjectSummary, "color" | "name">; className?: string }) {
+export function ProjectMark({ project, className }: { project: Pick<ProjectSummary, "color" | "name">; className?: string }) {
   return (
     <span
       aria-hidden
@@ -68,7 +82,7 @@ function ProjectMark({ project, className }: { project: Pick<ProjectSummary, "co
   );
 }
 
-function formatDate(value: string | null): string | null {
+export function formatDate(value: string | null): string | null {
   if (!value) return null;
   return new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
@@ -193,12 +207,14 @@ export function ProjectDetailView({
   initialTab,
   onBack,
   onOpenIssue,
+  onOpenInitiative,
 }: {
   projectId: string;
   initialTab?: "overview" | "updates" | "issues";
   /** Omitted in the thread side panel, which has no list to go back to. */
   onBack?: () => void;
   onOpenIssue: (identifier: string) => void;
+  onOpenInitiative?: (initiativeId: string) => void;
 }) {
   const rpc = useRpc<typeof rpcContract>();
   const links = useIssueLinks();
@@ -331,24 +347,76 @@ export function ProjectDetailView({
             initial={toFormValues(project)}
             onSaved={() => setReloadNonce((n) => n + 1)}
           />
-          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-border bg-card p-3 text-sm">
-            <StatusBadge status={project.status} />
-            <HealthBadge health={project.health} />
-            <ProgressBar value={project.progress} color={project.color} />
-            {project.lead ? (
-              <span className="text-xs text-muted-foreground">
-                Lead <span className="text-foreground">{project.lead.name}</span>
+          <dl className="mt-4 space-y-2.5 rounded-lg border border-border bg-card p-3 text-sm">
+            <PropertyRow label="Properties">
+              <StatusBadge status={project.status} />
+              <HealthBadge health={project.health} />
+              <span className="inline-flex items-center gap-1.5 text-xs">
+                <PriorityIcon priority={project.priority} label={project.priorityLabel} />
+                {project.priorityLabel}
               </span>
-            ) : null}
-            {project.startDate || project.targetDate ? (
-              <span className="text-xs text-muted-foreground">
-                {formatDate(project.startDate) ?? "…"} → {formatDate(project.targetDate) ?? "…"}
+              <span className="inline-flex items-center gap-1.5 text-xs">
+                <Icon name="User" className="size-3.5 text-muted-foreground" />
+                {project.lead?.name ?? <span className="text-muted-foreground">No lead</span>}
               </span>
+              <span className="inline-flex items-center gap-1.5 text-xs">
+                <Icon name="Calendar" className="size-3.5 text-muted-foreground" />
+                {project.startDate || project.targetDate ? (
+                  `${formatDate(project.startDate) ?? "…"} → ${formatDate(project.targetDate) ?? "…"}`
+                ) : (
+                  <span className="text-muted-foreground">No target date</span>
+                )}
+              </span>
+              {project.teamNames.length ? (
+                <span className="inline-flex items-center gap-1.5 text-xs">
+                  <Icon name="Users" className="size-3.5 text-muted-foreground" />
+                  {project.teamNames.join(", ")}
+                </span>
+              ) : null}
+              {project.members.length ? (
+                <span className="text-xs text-muted-foreground">{project.members.length} members</span>
+              ) : null}
+              <ProgressBar value={project.progress} color={project.color} />
+            </PropertyRow>
+            {project.initiatives.length ? (
+              <PropertyRow label={project.initiatives.length === 1 ? "Initiative" : "Initiatives"}>
+                {project.initiatives.map((initiative) =>
+                  onOpenInitiative ? (
+                    <button
+                      key={initiative.id}
+                      type="button"
+                      onClick={() => onOpenInitiative(initiative.id)}
+                      className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs hover:bg-accent/50"
+                    >
+                      <InitiativeDot color={initiative.color} />
+                      {initiative.name}
+                    </button>
+                  ) : (
+                    <span key={initiative.id} className="inline-flex items-center gap-1.5 px-1.5 py-0.5 text-xs">
+                      <InitiativeDot color={initiative.color} />
+                      {initiative.name}
+                    </span>
+                  ),
+                )}
+              </PropertyRow>
             ) : null}
-            {project.members.length ? (
-              <span className="text-xs text-muted-foreground">{project.members.length} members</span>
+            {project.links.length ? (
+              <PropertyRow label="Resources">
+                {project.links.map((link) => (
+                  <UrlLink
+                    key={link.url}
+                    href={link.url}
+                    target="_blank"
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs hover:bg-accent/50"
+                  >
+                    <Icon name="FileText" className="size-3.5" />
+                    {link.label || link.url}
+                    <Icon name="ArrowUpRight" className="size-3" />
+                  </UrlLink>
+                ))}
+              </PropertyRow>
             ) : null}
-          </div>
+          </dl>
 
           <div role="tablist" aria-label="Project sections" className="mt-5 flex gap-1 border-b border-border">
             {(
@@ -420,7 +488,7 @@ export function ProjectDetailView({
             ) : tab === "updates" ? (
               <div className="space-y-4">
                 <UpdateComposer
-                  projectId={project.id}
+                  target={{ kind: "project", id: project.id }}
                   currentHealth={project.health}
                   onPosted={() => setReloadNonce((n) => n + 1)}
                 />
@@ -545,7 +613,7 @@ function MilestoneChips({
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
       <h2 className="mb-2 text-sm font-medium">{title}</h2>
@@ -568,10 +636,23 @@ function toFormValues(project: ProjectDetail): ProjectFormValues {
   };
 }
 
-function UpdateCard({ update, onChanged }: { update: ProjectDetail["updates"][number]; onChanged: () => void }) {
+export function UpdateCard({
+  update,
+  onChanged,
+  kind = "project",
+}: {
+  update: ProjectDetail["updates"][number];
+  onChanged?: () => void;
+  /** Project and initiative updates have their own edit/archive mutations. */
+  kind?: "project" | "initiative";
+}) {
   const rpc = useRpc<typeof rpcContract>();
   const options = useWriteOptions();
   const mine = options !== null && update.authorId === options.viewer.id;
+  const edit = (body: string) =>
+    kind === "project" ? rpc.call("update_edit", { id: update.id, body }) : rpc.call("initiative_update_edit", { id: update.id, body });
+  const archive = () =>
+    kind === "project" ? rpc.call("update_archive", { id: update.id }) : rpc.call("initiative_update_archive", { id: update.id });
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(update.body);
   const [busy, setBusy] = useState(false);
@@ -580,7 +661,7 @@ function UpdateCard({ update, onChanged }: { update: ProjectDetail["updates"][nu
     try {
       await run();
       setEditing(false);
-      onChanged();
+      onChanged?.();
     } catch (cause) {
       toast.error(errorText(cause));
     } finally {
@@ -600,7 +681,7 @@ function UpdateCard({ update, onChanged }: { update: ProjectDetail["updates"][nu
         />
         <div className="flex justify-end gap-2">
           <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={busy}>Cancel</Button>
-          <Button size="sm" onClick={() => void act(() => rpc.call("update_edit", { id: update.id, body: draft }))} disabled={busy || !draft.trim()}>
+          <Button size="sm" onClick={() => void act(() => edit(draft))} disabled={busy || !draft.trim()}>
             Save
           </Button>
         </div>
@@ -621,7 +702,7 @@ function UpdateCard({ update, onChanged }: { update: ProjectDetail["updates"][nu
             </button>
             <button
               type="button"
-              onClick={() => window.confirm("Archive this update?") && void act(() => rpc.call("update_archive", { id: update.id }))}
+              onClick={() => window.confirm("Archive this update?") && void act(archive)}
               className="hover:text-red-600"
               disabled={busy}
             >

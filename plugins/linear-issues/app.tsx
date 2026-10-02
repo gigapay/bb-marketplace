@@ -9,6 +9,7 @@ import { EmptyState, ErrorLine, errorText } from "./views/shared";
 import { IssueDetail } from "./views/IssueDetail";
 import { IssueList } from "./views/IssueList";
 import { ProjectDetailView, ProjectList } from "./views/Projects";
+import { InitiativeDetailView, InitiativeList } from "./views/Initiatives";
 import { HomeSection } from "./views/HomeSection";
 import { ThreadHeaderLink } from "./views/ThreadHeaderLink";
 import { THREAD_PANEL_ACTION_ID, ThreadLinearPanel } from "./views/ThreadLinearPanel";
@@ -23,10 +24,11 @@ const PANEL_PATH = "issues";
 
 let returnTo = "";
 
-function PageTabs({ active, onSelect }: { active: "issues" | "projects"; onSelect: (path: string) => void }) {
+function PageTabs({ active, onSelect }: { active: "issues" | "projects" | "initiatives"; onSelect: (path: string) => void }) {
   const tabs = [
     { id: "issues", label: "Issues", path: "" },
     { id: "projects", label: "Projects", path: "projects" },
+    { id: "initiatives", label: "Initiatives", path: "initiatives" },
   ] as const;
   return (
     <div role="tablist" aria-label="Linear" className="mb-3 flex gap-1 border-b border-border">
@@ -83,6 +85,19 @@ function LinearPage({ subPath }: PluginNavPanelProps) {
           </EmptyState>
         ) : status.viewer === null ? (
           <ErrorLine error={status.error ?? "Could not reach Linear."} />
+        ) : parts[0] === "initiatives" && parts[1] ? (
+          <InitiativeDetailView
+            key={parts[1]}
+            initiativeId={parts[1]}
+            onBack={() => go("initiatives")}
+            onOpenProject={(id) => go(`projects/${encodeURIComponent(id)}`)}
+            onOpenInitiative={(id) => go(`initiatives/${encodeURIComponent(id)}`)}
+          />
+        ) : parts[0] === "initiatives" ? (
+          <>
+            <PageTabs active="initiatives" onSelect={go} />
+            <InitiativeList onOpen={(id) => go(`initiatives/${encodeURIComponent(id)}`)} />
+          </>
         ) : parts[0] === "projects" && parts[1] ? (
           <ProjectDetailView
             key={`${parts[1]}/${parts[2] ?? ""}`}
@@ -90,6 +105,7 @@ function LinearPage({ subPath }: PluginNavPanelProps) {
             initialTab={parts[2] === "updates" || parts[2] === "issues" ? parts[2] : undefined}
             onBack={() => go("projects")}
             onOpenIssue={openIssueFrom(`projects/${parts[1]}`)}
+            onOpenInitiative={(id) => go(`initiatives/${encodeURIComponent(id)}`)}
           />
         ) : parts[0] === "projects" ? (
           <>

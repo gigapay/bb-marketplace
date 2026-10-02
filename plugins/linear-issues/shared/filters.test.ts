@@ -24,11 +24,17 @@ test("milestone progress (percent) is normalized like project progress (fraction
     id: "p", name: "P", description: "", icon: null, color: "#000", url: "u", status: null, health: null,
     progress: 0.35, startDate: null, targetDate: null, updatedAt: "", lead: null, teams: { nodes: [] },
     content: null, members: { nodes: [] }, projectUpdates: { nodes: [] },
+    teamNames: { nodes: [{ name: "Gigapay" }] },
+    initiatives: { nodes: [{ id: "i", name: "Q4 O3", color: null, status: "Active" }] },
+    externalLinks: { nodes: [{ label: "Spec", url: "https://example.com" }] },
     projectMilestones: { nodes: [
       { id: "a", name: "A", targetDate: null, progress: 84.62, sortOrder: 1 },
       { id: "b", name: "B", targetDate: null, progress: 0, sortOrder: 2 },
     ] },
   } as any);
   assert.equal(detail.progress, 0.35);
+  assert.deepEqual(detail.teamNames, ["Gigapay"]);
+  assert.equal(detail.initiatives[0]?.name, "Q4 O3");
+  assert.deepEqual(detail.links, [{ label: "Spec", url: "https://example.com" }]);
   assert.deepEqual(detail.milestones.map((m) => Math.round(m.progress * 10_000) / 10_000), [0.8462, 0]);
 });
