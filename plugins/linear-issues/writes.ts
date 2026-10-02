@@ -7,19 +7,24 @@ type Linear = <T>(query: string, variables?: Record<string, unknown>) => Promise
 
 // ------------------------------------------------------------------ options
 
-export const WRITE_OPTIONS_QUERY = `query WriteOptions {
+// Split in four: as one query (teams × members, labels, projects × teams)
+// Linear rejected it as "Query too complex". Each part stays well under the
+// limit, and they run in parallel.
+const OPTIONS_TEAMS_QUERY = `query WriteOptionsTeams {
   viewer { id name }
-  teams(first: 50) {
-    nodes {
-      id key name
-      states(first: 50) { nodes { id name type color position } }
-      members(first: 250) { nodes { id name displayName email active } }
-    }
-  }
+  teams(first: 50) { nodes { id key name states(first: 50) { nodes { id name type color position } } } }
+}`;
+const OPTIONS_USERS_QUERY = `query WriteOptionsUsers {
+  users(first: 250, filter: { active: { eq: true } }) { nodes { id name displayName email } }
+}`;
+const OPTIONS_LABELS_QUERY = `query WriteOptionsLabels {
   projectStatuses(first: 50) { nodes { id name type color position } }
   issueLabels(first: 250) { nodes { id name color isGroup retiredAt parent { name } team { id } } }
-  projects(first: 250, orderBy: updatedAt) { nodes { id name color status { type } teams(first: 10) { nodes { id } } } }
 }`;
+const OPTIONS_PROJECTS_QUERY = `query WriteOptionsProjects {
+  projects(first: 250, orderBy: updatedAt) { nodes { id name color status { type } teams(first: 5) { nodes { id } } } }
+}`;
+export const WRITE_OPTIONS_QUERIES = [OPTIONS_TEAMS_QUERY, OPTIONS_USERS_QUERY, OPTIONS_LABELS_QUERY, OPTIONS_PROJECTS_QUERY];
 
 export const writeOptionsSchema = z.object({
   viewer: z.object({ id: z.string(), name: z.string() }),
@@ -38,36 +43,43 @@ export const writeOptionsSchema = z.object({
 });
 export type WriteOptions = z.infer<typeof writeOptionsSchema>;
 
-type RawOptions = {
+type Member = WriteOptions["teams"][number]["members"][number];
+type RawTeams = {
   viewer: { id: string; name: string };
-  teams: {
-    nodes: {
-      id: string; key: string; name: string;
-      states: { nodes: WriteOptions["teams"][number]["states"] };
-      members: { nodes: (WriteOptions["teams"][number]["members"][number] & { active: boolean })[] };
-    }[];
-  };
+  teams: { nodes: { id: string; key: string; name: string; states: { nodes: WriteOptions["teams"][number]["states"] } }[] };
+};
+type RawLabels = {
   projectStatuses: { nodes: WriteOptions["projectStatuses"] };
   issueLabels: { nodes: { id: string; name: string; color: string; isGroup: boolean; retiredAt: string | null; parent: { name: string } | null; team: { id: string } | null }[] };
+};
+type RawProjects = {
   projects: { nodes: { id: string; name: string; color: string; status: { type: string } | null; teams: { nodes: { id: string }[] } }[] };
 };
 
 export async function loadWriteOptions(linear: Linear): Promise<WriteOptions> {
-  const raw = await linear<RawOptions>(WRITE_OPTIONS_QUERY);
+  const [teams, users, labels, projects] = await Promise.all([
+    linear<RawTeams>(OPTIONS_TEAMS_QUERY),
+    linear<{ users: { nodes: Member[] } }>(OPTIONS_USERS_QUERY),
+    linear<RawLabels>(OPTIONS_LABELS_QUERY),
+    linear<RawProjects>(OPTIONS_PROJECTS_QUERY),
+  ]);
+  // Assignees come from the workspace's active users; per-team membership
+  // was what made the single query too complex.
+  const members = users.users.nodes;
   return {
-    viewer: raw.viewer,
-    teams: raw.teams.nodes.map((team) => ({
+    viewer: teams.viewer,
+    teams: teams.teams.nodes.map((team) => ({
       id: team.id,
       key: team.key,
       name: team.name,
       states: team.states.nodes.slice().sort((a, b) => a.position - b.position),
-      members: team.members.nodes.filter((member) => member.active).map(({ id, name, displayName, email }) => ({ id, name, displayName, email })),
+      members,
     })),
-    projectStatuses: raw.projectStatuses.nodes.slice().sort((a, b) => a.position - b.position),
-    labels: raw.issueLabels.nodes
+    projectStatuses: labels.projectStatuses.nodes.slice().sort((a, b) => a.position - b.position),
+    labels: labels.issueLabels.nodes
       .filter((label) => !label.isGroup && label.retiredAt === null)
       .map((label) => ({ id: label.id, name: label.name, color: label.color, group: label.parent?.name ?? null, teamId: label.team?.id ?? null })),
-    projects: raw.projects.nodes.map((project) => ({
+    projects: projects.projects.nodes.map((project) => ({
       id: project.id,
       name: project.name,
       color: project.color,
@@ -97,7 +109,7 @@ const UPDATE_EDIT = `mutation ProjectUpdateEdit($id: String!, $input: ProjectUpd
 const UPDATE_ARCHIVE = `mutation ProjectUpdateArchive($id: String!) { projectUpdateArchive(id: $id) { success } }`;
 
 export const ALL_WRITE_DOCUMENTS = [
-  WRITE_OPTIONS_QUERY, PROJECT_MILESTONES_QUERY, ISSUE_CREATE, ISSUE_UPDATE, ISSUE_ARCHIVE, COMMENT_CREATE, COMMENT_UPDATE,
+  ...WRITE_OPTIONS_QUERIES, PROJECT_MILESTONES_QUERY, ISSUE_CREATE, ISSUE_UPDATE, ISSUE_ARCHIVE, COMMENT_CREATE, COMMENT_UPDATE,
   COMMENT_DELETE, PROJECT_CREATE, PROJECT_UPDATE, PROJECT_DELETE, UPDATE_CREATE, UPDATE_EDIT, UPDATE_ARCHIVE,
 ];
 
@@ -258,7 +270,7 @@ export function resolver(options: WriteOptions) {
     user(team: WriteOptions["teams"][number] | null, value: string): string | null {
       if (norm(value) === "me") return options.viewer.id;
       if (norm(value) === "none") return null;
-      const members = team?.members ?? options.teams.flatMap((t) => t.members);
+      const members = team?.members ?? options.teams[0]?.members ?? [];
       return pick(members, value, [(m) => m.email, (m) => m.displayName, (m) => m.name], "user", (m) => m.displayName).id;
     },
     labels(team: WriteOptions["teams"][number] | null, values: string[]): string[] {
