@@ -1,5 +1,5 @@
 {
-  "name": "bb-plugin-linear-issues",
+  "name": "bb-plugin-linear-issues-dev",
   "version": "0.17.0",
   "type": "module",
   "engines": {
@@ -7,7 +7,7 @@
     "bbPluginSdk": ">=0.5.29"
   },
   "bb": {
-    "name": "Linear Issues",
+    "name": "Linear Issues (dev)",
     "description": "Browse, create and edit Linear issues, projects and updates, and start a BB thread from any ticket.",
     "branding": {
       "icon": "./assets/linear.svg",
