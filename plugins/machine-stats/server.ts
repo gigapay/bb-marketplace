@@ -82,7 +82,7 @@ function stackLine(stack: Stack, cleanup?: CleanupStatus): string {
   const running = stack.containers.filter((c) => c.state === "running").length;
   const hosts = stack.hosts.length > 0 ? stack.hosts.join(" ") : "no traefik host";
   const line = `${stack.id}  ${running}/${stack.containers.length} running  ${hosts}`;
-  if (cleanup === undefined) return line;
+  if (cleanup === undefined || cleanup.verdict === "unknown") return line;
   const verdict = cleanup.verdict === "ready" ? "READY TO DESTROY" : cleanup.verdict;
   const worktree = cleanup.worktreeMissing ? " Worktree is gone." : "";
   return `${line}\n    ${verdict}: ${cleanup.reason}${worktree}`;

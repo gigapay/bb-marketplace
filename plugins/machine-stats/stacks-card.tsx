@@ -97,7 +97,8 @@ function useCleanup(hostId: string | null, slugs: string[], nonce: number) {
 }
 
 function CleanupBadge({ cleanup }: { cleanup: CleanupStatus | undefined }) {
-  if (cleanup === undefined) return null;
+  // No ticket in the slug, or a failed lookup: nothing worth showing.
+  if (cleanup === undefined || cleanup.verdict === "unknown") return null;
   const title = [cleanup.reason, cleanup.worktreeMissing ? "Its worktree is gone." : null]
     .filter(Boolean)
     .join(" ");

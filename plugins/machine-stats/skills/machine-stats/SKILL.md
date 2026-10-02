@@ -27,6 +27,6 @@ CPU is sampled over half a second, so a single reading is noisy. Check the load 
 
 Every compose project named `staging-<slug>` (plus its `staging-<slug>-app` frontend) is a slug. Other compose projects appear only when they're exposed through Traefik, and they can't be destroyed from here.
 
-`--cleanup` only marks a slug ready when its ticket (`gig-5697` is `GIG-5697`) is Done or Canceled and no PR for it is still open. Slugs without a ticket in their name show `unknown`. Use it to suggest what to clean up, but still ask before destroying anything.
+`--cleanup` only marks a slug ready when its ticket (`gig-5697` is `GIG-5697`) is Done or Canceled and no PR for it is still open. Slugs without a ticket in their name, or whose lookup failed, get no verdict line. Use it to suggest what to clean up, but still ask before destroying anything.
 
 Destroy deletes the staging database and Redis volumes. It's irreversible, so confirm with the user first and name the slug you're about to remove. It leaves the git worktree and `/var/apps/runtime/<slug>` in place; `remove-worktree.sh` in the gigapay repo handles those.
