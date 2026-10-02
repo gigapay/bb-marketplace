@@ -39,6 +39,10 @@ import {
 } from "./writes.js";
 import {
   PROJECT_UPDATE_CONTEXT_QUERY,
+  INITIATIVE_UPDATE_CONTEXT_QUERY,
+  buildInitiativeUpdateContext,
+  buildInitiativeUpdatePrompt,
+  type RawInitiativeContext,
   PROJECT_UPDATE_CREATE_MUTATION,
   buildUpdateContext,
   buildUpdatePrompt,
@@ -262,6 +266,32 @@ export const rpcContract = defineRpcContract({
     input: z.object({ projectId: z.string().min(1).max(100), notes: z.string().max(2000) }).strict(),
     output: z.object({ threadId: z.string() }),
   },
+  initiative_update_draft_start: {
+    input: z.object({ initiativeId: z.string().min(1).max(100), notes: z.string().max(2000) }).strict(),
+    output: z.object({ threadId: z.string() }),
+  },
+  initiative_update_create: {
+    input: z
+      .object({
+        initiativeId: z.string().min(1).max(100),
+        body: z.string().trim().min(1).max(50_000),
+        health: z.enum(["onTrack", "atRisk", "offTrack"]),
+        draftThreadId: z.string().min(1).max(100).nullable(),
+      })
+      .strict(),
+    output: z.object({ url: z.string().nullable() }),
+  },
+  initiative_update_edit: {
+    input: z
+      .object({
+        id: z.string().min(1).max(100),
+        body: z.string().trim().min(1).max(50_000).optional(),
+        health: z.enum(["onTrack", "atRisk", "offTrack"]).optional(),
+      })
+      .strict(),
+    output: z.object({ ok: z.literal(true) }),
+  },
+  initiative_update_archive: { input: z.object({ id: z.string().min(1).max(100) }).strict(), output: z.object({ ok: z.literal(true) }) },
   update_draft_get: {
     input: z.object({ threadId: z.string().min(1).max(100) }).strict(),
     output: z.object({
@@ -620,6 +650,44 @@ export default async function plugin(bb: BbPluginApi) {
 
   const writer = createWriter(linear);
 
+  // Each drafting step names itself in the error, so "fetch failed" never
+  // reaches the user without saying what was being fetched.
+  async function draftStep<T>(label: string, run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (cause) {
+      bb.log.error(`update draft: ${label} failed: ${errorMessage(cause)}`);
+      throw new Error(`${label} failed: ${errorMessage(cause)}`);
+    }
+  }
+
+  /** Starts a hidden agent thread whose last message will be the draft. */
+  async function spawnDraft(
+    step: typeof draftStep,
+    title: string,
+    prompt: string,
+    pluginMetadata: Record<string, string>,
+  ): Promise<{ threadId: string }> {
+    // Drafting needs no code checkout, so it runs outside any project.
+    const personal = await step("Finding BB's personal project", async () => {
+      const projects = await bb.sdk.projects.list({ includePersonal: true });
+      const found = projects.find((candidate) => candidate.kind === "personal");
+      if (!found) throw new Error("BB has no personal project to run the drafting agent in");
+      return found;
+    });
+    const thread = await step("Starting the drafting agent", () =>
+      bb.sdk.threads.spawn({
+        projectId: personal.id,
+        environment: { type: "project-default" },
+        prompt,
+        title,
+        visibility: "hidden",
+        pluginMetadata,
+      }),
+    );
+    return { threadId: thread.id };
+  }
+
   async function listIssues(
     scope: IssueScope,
     includeCompleted: boolean,
@@ -909,41 +977,41 @@ export default async function plugin(bb: BbPluginApi) {
       return { projects: data.projects.nodes.map(flattenProject) };
     },
     update_draft_start: async ({ projectId, notes }) => {
-      // Each step names itself in the error, so "fetch failed" never reaches
-      // the user without saying what was being fetched.
-      const step = async <T>(label: string, run: () => Promise<T>): Promise<T> => {
-        try {
-          return await run();
-        } catch (cause) {
-          bb.log.error(`update draft: ${label} failed: ${errorMessage(cause)}`);
-          throw new Error(`${label} failed: ${errorMessage(cause)}`);
-        }
-      };
+      const step = draftStep;
       const data = await step("Reading the project from Linear", () =>
         linear<{ project: RawUpdateContext | null }>(PROJECT_UPDATE_CONTEXT_QUERY, { id: projectId }),
       );
       if (data.project === null) throw new Error("Project not found");
       const project = data.project;
       const context = buildUpdateContext(project);
-      // Drafting needs no code checkout, so it runs outside any project.
-      const personal = await step("Finding BB's personal project", async () => {
-        const projects = await bb.sdk.projects.list({ includePersonal: true });
-        const found = projects.find((candidate) => candidate.kind === "personal");
-        if (!found) throw new Error("BB has no personal project to run the drafting agent in");
-        return found;
+      return spawnDraft(step, `Project update draft: ${project.name}`, buildUpdatePrompt(project.name, context, notes), {
+        kind: "project-update-draft",
+        projectId,
       });
-      const thread = await step("Starting the drafting agent", () =>
-        bb.sdk.threads.spawn({
-          projectId: personal.id,
-          environment: { type: "project-default" },
-          prompt: buildUpdatePrompt(project.name, context, notes),
-          title: `Project update draft: ${project.name}`,
-          visibility: "hidden",
-          pluginMetadata: { kind: "project-update-draft", projectId },
-        }),
-      );
-      return { threadId: thread.id };
     },
+    initiative_update_draft_start: async ({ initiativeId, notes }) => {
+      const step = draftStep;
+      const data = await step("Reading the initiative from Linear", () =>
+        linear<{ initiative: RawInitiativeContext | null }>(INITIATIVE_UPDATE_CONTEXT_QUERY, { id: initiativeId }),
+      );
+      if (data.initiative === null) throw new Error("Initiative not found");
+      const initiative = data.initiative;
+      const context = buildInitiativeUpdateContext(initiative);
+      return spawnDraft(step, `Initiative update draft: ${initiative.name}`, buildInitiativeUpdatePrompt(initiative.name, context, notes), {
+        kind: "initiative-update-draft",
+        initiativeId,
+      });
+    },
+    initiative_update_create: async ({ initiativeId, body, health, draftThreadId }) => {
+      const result = await writer.postInitiativeUpdate(initiativeId, body, health);
+      if (draftThreadId) {
+        await bb.sdk.threads.archive({ threadId: draftThreadId }).catch(() => undefined);
+        await bb.sdk.threads.stop({ threadId: draftThreadId }).catch(() => undefined);
+      }
+      return { url: result.url };
+    },
+    initiative_update_edit: async ({ id, ...input }) => (await writer.editInitiativeUpdate(id, input), { ok: true as const }),
+    initiative_update_archive: async ({ id }) => (await writer.archiveInitiativeUpdate(id), { ok: true as const }),
     update_draft_get: async ({ threadId }) => {
       const thread = await bb.sdk.threads.get({ threadId });
       if (thread.status === "error") {

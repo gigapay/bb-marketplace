@@ -71,6 +71,7 @@ function ProjectInPanel({ threadId, projectId }: { threadId: string; projectId: 
     <ProjectDetailView
       projectId={projectId}
       onOpenIssue={(identifier) => openLinearTarget(navigate, { kind: "issue", identifier }, threadIssue)}
+      onOpenInitiative={(id) => openLinearTarget(navigate, { kind: "initiative", id }, null)}
     />
   );
 }
