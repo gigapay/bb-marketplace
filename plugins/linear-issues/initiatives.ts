@@ -51,10 +51,12 @@ const BASE_FIELDS = `
   parent: parentInitiative { id name }
   lastUpdate { createdAt }
 `;
-const SUMMARY_FIELDS = `${BASE_FIELDS} projects(first: 100) { nodes { progress } }`;
+// Kept small on purpose: initiatives × projects multiplies, and Linear
+// rejects queries past its complexity budget (as it did for write options).
+const SUMMARY_FIELDS = `${BASE_FIELDS} projects(first: 50) { nodes { progress } }`;
 
 export const INITIATIVES_QUERY = `query Initiatives($filter: InitiativeFilter) {
-  initiatives(first: 150, filter: $filter, orderBy: updatedAt) { nodes { ${SUMMARY_FIELDS} } }
+  initiatives(first: 50, filter: $filter, orderBy: updatedAt) { nodes { ${SUMMARY_FIELDS} } }
 }`;
 
 export const INITIATIVE_QUERY = `query Initiative($id: String!) {
@@ -64,7 +66,7 @@ export const INITIATIVE_QUERY = `query Initiative($id: String!) {
     links(first: 50) { nodes { label url } }
     initiativeUpdates(first: 30) { nodes { id body health createdAt editedAt url user { id name } } }
     subInitiatives(first: 50) { nodes { id name status health targetDate owner { id name } } }
-    projects(first: 100) { nodes { ${PROJECT_SUMMARY_FIELDS} } }
+    projects(first: 50) { nodes { ${PROJECT_SUMMARY_FIELDS} } }
   }
 }`;
 
