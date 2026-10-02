@@ -5,6 +5,7 @@ See at a glance how busy the machine behind your thread is, and clean up the sta
 - A Machine card in the sidebar footer (server icon), next to Usage Bar.
 - Live CPU, RAM and per-disk bars, refreshed every 3 seconds while the card is open. Colors turn amber at 75% and red at 90%.
 - One row per `staging-<slug>` stack with container health, age and links to its Traefik hosts.
+- A "done" tag on slugs whose Linear ticket is Done and whose PRs are all merged, so you know which ones to clean up.
 - A destroy button per slug that runs `docker compose down --volumes` on both the backend and frontend projects.
 - The other Traefik-exposed services, listed read-only.
 - A `bb machine-stats` command so agents can check load before heavy work, and list or destroy slugs.

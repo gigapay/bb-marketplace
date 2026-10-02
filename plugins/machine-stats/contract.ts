@@ -69,9 +69,39 @@ export const destroyResultSchema = z.object({
   output: z.string(),
 });
 
+export const pullRequestSchema = z.object({
+  repo: z.string(),
+  number: z.number(),
+  state: z.enum(["OPEN", "MERGED", "CLOSED"]),
+  url: z.string(),
+});
+
+// Whether a slug's Linear ticket and pull requests are finished, so the stack
+// is safe to destroy.
+export const cleanupStatusSchema = z.object({
+  slug: z.string(),
+  verdict: z.enum(["ready", "active", "unknown"]),
+  reason: z.string(),
+  issue: z
+    .object({
+      identifier: z.string(),
+      state: z.string(),
+      stateType: z.string(),
+      url: z.string(),
+    })
+    .nullable(),
+  pullRequests: z.array(pullRequestSchema),
+  worktreeMissing: z.boolean(),
+});
+
+// owner/name, as gh expects it.
+export const repoSchema = z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
+
 export type Stack = z.infer<typeof stackSchema>;
 export type StackListing = z.infer<typeof listingSchema>;
 export type DestroyResult = z.infer<typeof destroyResultSchema>;
+export type CleanupStatus = z.infer<typeof cleanupStatusSchema>;
+export type PullRequest = z.infer<typeof pullRequestSchema>;
 
 export const hostContract = defineRpcContract({
   snapshot: {
@@ -85,5 +115,14 @@ export const hostContract = defineRpcContract({
   destroy_stack: {
     input: z.object({ slug: slugSchema }).strict(),
     output: destroyResultSchema,
+  },
+  cleanup_status: {
+    input: z
+      .object({
+        slugs: z.array(slugSchema).max(50),
+        repos: z.array(repoSchema).max(10),
+      })
+      .strict(),
+    output: z.array(cleanupStatusSchema),
   },
 });

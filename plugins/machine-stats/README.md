@@ -23,6 +23,12 @@ The plugin ships a `bb.host` entry that runs in the target machine's daemon, so 
 
 Every docker compose project named `staging-<slug>` is a slug, and its `staging-<slug>-app` frontend project is folded into the same row. That's what `worktree-staging.sh` and `create-worktree.sh` produce. Other compose projects show up under "Other services" only when one of their containers has `traefik.enable=true` (the gateway, dev-dashboard, storybook...). Those are read-only: no destroy button. Machines without docker show "Docker isn't reachable".
 
+## Which slugs are done
+
+For slugs named after a Linear ticket (`gig-5697` is `GIG-5697`), the card checks whether the work behind them has shipped. A green "done" tag means the ticket is Done (or Canceled) and every pull request found for it is merged, so the stack is safe to destroy. Hover it for the details. A yellow "no worktree" tag means the slug's worktree under `/var/apps` is gone but its containers still run.
+
+The check runs on the slug's machine. It reads the ticket with `bb linear show` (so the Linear Issues plugin must be installed with an API key) and the PRs with `gh pr list` in each repository of the "GitHub repositories" setting (default `gigapay/gigapay, gigapay/gigapay-app`). A PR counts when its branch or title names the ticket. Results are cached for five minutes; the refresh button skips the cache.
+
 ## Destroying
 
 The trash icon asks for a confirmation, then runs on the target machine:
@@ -39,7 +45,7 @@ It goes by project name from a neutral directory, so it works even when the work
 ```
 bb machine-stats machines [--json]
 bb machine-stats show [<host-id>] [--json]
-bb machine-stats stacks [--host <host-id>] [--json]
+bb machine-stats stacks [--cleanup] [--host <host-id>] [--json]
 bb machine-stats destroy <slug> --yes [--host <host-id>] [--json]
 ```
 
