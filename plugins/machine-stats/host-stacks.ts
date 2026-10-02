@@ -1,10 +1,9 @@
-// Runs inside the BB daemon of whichever machine the server targets, so the
-// docker CLI here talks to that machine's engine.
+// Staging slugs and Traefik services, read from the host entry machine's
+// docker engine.
 import { execFile } from "node:child_process";
 import os from "node:os";
 import { promisify } from "node:util";
-import { experimental_defineHostEntry } from "@get-bb/plugin-sdk/host";
-import { hostContract, SLUG_PATTERN, type Stack, type StackListing } from "./contract.js";
+import { SLUG_PATTERN, type DestroyResult, type Stack, type StackListing } from "./contract.js";
 
 const run = promisify(execFile);
 const LIST_TIMEOUT_MS = 15_000;
@@ -127,7 +126,7 @@ function groupStacks(containers: Inspected[]): Stack[] {
     .sort((a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
 }
 
-async function list(signal: AbortSignal): Promise<StackListing> {
+export async function listStacks(signal: AbortSignal): Promise<StackListing> {
   const base = { hostname: os.hostname(), sampledAt: Date.now() };
   try {
     return { ...base, dockerError: null, stacks: groupStacks(await inspectAll(signal)) };
@@ -137,39 +136,33 @@ async function list(signal: AbortSignal): Promise<StackListing> {
   }
 }
 
-export default experimental_defineHostEntry({
-  contract: hostContract,
-  handlers: {
-    list: (_input, context) => list(context.signal),
-    destroy: async ({ slug }, context) => {
-      if (!SLUG_PATTERN.test(slug)) throw new Error(`Invalid slug: ${slug}`);
-      const listing = await list(context.signal);
-      if (listing.dockerError !== null) throw new Error(listing.dockerError);
-      // Only ever tear down projects we just saw grouped under this staging slug.
-      const stack = listing.stacks.find((s) => s.kind === "staging" && s.id === slug);
-      if (stack === undefined) throw new Error(`No staging stack named ${slug} on ${listing.hostname}.`);
-      // Frontend first: it shares the backend's isolated network.
-      const projects = [...stack.projects].sort((a, b) => b.length - a.length);
-      const output: string[] = [];
-      for (const project of projects) {
-        try {
-          // By project name, from a neutral cwd, so it works even when the
-          // worktree is gone and never picks up a stray compose file.
-          const { stdout, stderr } = await run(
-            "docker",
-            ["compose", "-p", project, "down", "--volumes", "--remove-orphans"],
-            { cwd: os.tmpdir(), timeout: DOWN_TIMEOUT_MS, maxBuffer: MAX_BUFFER, signal: context.signal },
-          );
-          output.push(`$ docker compose -p ${project} down --volumes --remove-orphans`, stdout, stderr);
-        } catch (cause) {
-          throw new Error(`docker compose -p ${project} down failed: ${errorMessage(cause)}`);
-        }
-      }
-      return {
-        slug,
-        projects,
-        output: output.map((chunk) => chunk.trim()).filter(Boolean).join("\n"),
-      };
-    },
-  },
-});
+export async function destroyStack(slug: string, signal: AbortSignal): Promise<DestroyResult> {
+  if (!SLUG_PATTERN.test(slug)) throw new Error(`Invalid slug: ${slug}`);
+  const listing = await listStacks(signal);
+  if (listing.dockerError !== null) throw new Error(listing.dockerError);
+  // Only ever tear down projects we just saw grouped under this staging slug.
+  const stack = listing.stacks.find((s) => s.kind === "staging" && s.id === slug);
+  if (stack === undefined) throw new Error(`No staging stack named ${slug} on ${listing.hostname}.`);
+  // Frontend first: it shares the backend's isolated network.
+  const projects = [...stack.projects].sort((a, b) => b.length - a.length);
+  const output: string[] = [];
+  for (const project of projects) {
+    try {
+      // By project name, from a neutral cwd, so it works even when the
+      // worktree is gone and never picks up a stray compose file.
+      const { stdout, stderr } = await run(
+        "docker",
+        ["compose", "-p", project, "down", "--volumes", "--remove-orphans"],
+        { cwd: os.tmpdir(), timeout: DOWN_TIMEOUT_MS, maxBuffer: MAX_BUFFER, signal },
+      );
+      output.push(`$ docker compose -p ${project} down --volumes --remove-orphans`, stdout, stderr);
+    } catch (cause) {
+      throw new Error(`docker compose -p ${project} down failed: ${errorMessage(cause)}`);
+    }
+  }
+  return {
+    slug,
+    projects,
+    output: output.map((chunk) => chunk.trim()).filter(Boolean).join("\n"),
+  };
+}

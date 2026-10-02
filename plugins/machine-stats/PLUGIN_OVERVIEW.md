@@ -1,12 +1,14 @@
-See at a glance how busy the machine behind your thread is.
+See at a glance how busy the machine behind your thread is, and clean up the staging slugs running on it.
 
 ## What you get
 
-- A Machine stats card in the sidebar footer (activity icon), next to Usage Bar.
-- Live CPU, RAM and per-disk bars, refreshed every 3 seconds while the card is open.
-- Colors that turn amber at 75% and red at 90%.
-- A `bb machine-stats` command so agents can check load before heavy work.
+- A Machine card in the sidebar footer (server icon), next to Usage Bar.
+- Live CPU, RAM and per-disk bars, refreshed every 3 seconds while the card is open. Colors turn amber at 75% and red at 90%.
+- One row per `staging-<slug>` stack with container health, age and links to its Traefik hosts.
+- A destroy button per slug that runs `docker compose down --volumes` on both the backend and frontend projects.
+- The other Traefik-exposed services, listed read-only.
+- A `bb machine-stats` command so agents can check load before heavy work, and list or destroy slugs.
 
 ## How it works
 
-The card follows the machine running the open thread, and falls back to the BB server's machine when no thread is open. A small host worker on that machine reads the numbers locally (`os.cpus()`, `/proc/meminfo` or `vm_stat`, `df`) and nothing leaves your BB setup.
+The card follows the machine running the open thread, and falls back to the BB server's machine when no thread is open. A small host worker on that machine reads the numbers locally (`os.cpus()`, `/proc/meminfo` or `vm_stat`, `df`, `docker inspect`) and nothing leaves your BB setup. Destroy re-checks the slug before touching anything and never targets non-staging projects.

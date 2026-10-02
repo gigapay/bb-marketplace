@@ -100,12 +100,13 @@
     {
       "id": "machine-stats",
       "displayName": "Machine Stats",
-      "description": "Live CPU, RAM and disk usage of the thread's machine in the sidebar footer.",
-      "icon": "Activity",
+      "description": "Live CPU, RAM and disk usage plus the staging slugs and Traefik services of the thread's machine, with one-click destroy, in the sidebar footer.",
+      "icon": "Server",
       "tags": [
         "monitoring",
         "machines",
-        "productivity"
+        "docker",
+        "staging"
       ],
       "author": {
         "name": "Gigapay",
@@ -117,29 +118,6 @@
           "subdir": "plugins/machine-stats",
           "range": ">=0.1.0 <1.0.0",
           "tagPrefix": "machine-stats/"
-        }
-      }
-    },
-    {
-      "id": "traefik-stacks",
-      "displayName": "Traefik Stacks",
-      "description": "Staging slugs and Traefik services on the thread's machine, with one-click destroy, in the sidebar footer.",
-      "icon": "Network",
-      "tags": [
-        "docker",
-        "traefik",
-        "staging"
-      ],
-      "author": {
-        "name": "Gigapay",
-        "github": "gigapay"
-      },
-      "source": {
-        "git": {
-          "url": "https://github.com/gigapay/bb-marketplace.git",
-          "subdir": "plugins/traefik-stacks",
-          "range": ">=0.1.0 <1.0.0",
-          "tagPrefix": "traefik-stacks/"
         }
       }
     },
