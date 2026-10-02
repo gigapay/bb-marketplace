@@ -128,7 +128,7 @@ function LinearPage({ subPath }: PluginNavPanelProps) {
 export default definePluginApp((app) => {
   app.slots.navPanel({
     id: "issues",
-    title: "Linear",
+    title: "Linear (dev)",
     icon: LINEAR_ICON,
     path: PANEL_PATH,
     component: LinearPage,
