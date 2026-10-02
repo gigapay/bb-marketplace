@@ -9,6 +9,10 @@ test("recognizes Linear issue and project links", () => {
   assert.deepEqual(parseLinearUrl("https://linear.app/gigapay/project/session-cookie-authentication-v2-8bb10d790123/overview"), { kind: "project", id: "8bb10d790123" });
 });
 
+test("recognizes initiative links", () => {
+  assert.deepEqual(parseLinearUrl("https://linear.app/gigapay/initiative/enterprise-readiness-1a2b3c4d5e6f/overview"), { kind: "initiative", id: "1a2b3c4d5e6f" });
+});
+
 test("ignores everything else", () => {
   assert.equal(parseLinearUrl("https://linear.app/gigapay/view/my-issues"), null);
   assert.equal(parseLinearUrl("https://github.com/gigapay/app/pull/1"), null);

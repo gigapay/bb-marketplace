@@ -28,13 +28,13 @@ const HEALTH = {
   offTrack: { label: "Off track", className: "bg-red-500/15 text-red-700 dark:text-red-400" },
 } as const;
 
-function HealthBadge({ health }: { health: ProjectSummary["health"] }) {
+export function HealthBadge({ health }: { health: ProjectSummary["health"] }) {
   if (health === null) return null;
   const { label, className } = HEALTH[health];
   return <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", className)}>{label}</span>;
 }
 
-function StatusBadge({ status }: { status: ProjectSummary["status"] }) {
+export function StatusBadge({ status }: { status: ProjectSummary["status"] }) {
   if (status === null) return null;
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -44,7 +44,7 @@ function StatusBadge({ status }: { status: ProjectSummary["status"] }) {
   );
 }
 
-function ProgressBar({ value, color }: { value: number; color: string }) {
+export function ProgressBar({ value, color }: { value: number; color: string }) {
   const percent = Math.round(Math.min(1, Math.max(0, value)) * 100);
   return (
     <span className="inline-flex shrink-0 items-center gap-2 text-xs text-muted-foreground" aria-label={`${percent}% done`}>
@@ -56,7 +56,7 @@ function ProgressBar({ value, color }: { value: number; color: string }) {
   );
 }
 
-function ProjectMark({ project, className }: { project: Pick<ProjectSummary, "color" | "name">; className?: string }) {
+export function ProjectMark({ project, className }: { project: Pick<ProjectSummary, "color" | "name">; className?: string }) {
   return (
     <span
       aria-hidden
@@ -68,7 +68,7 @@ function ProjectMark({ project, className }: { project: Pick<ProjectSummary, "co
   );
 }
 
-function formatDate(value: string | null): string | null {
+export function formatDate(value: string | null): string | null {
   if (!value) return null;
   return new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
@@ -545,7 +545,7 @@ function MilestoneChips({
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
       <h2 className="mb-2 text-sm font-medium">{title}</h2>
@@ -568,10 +568,19 @@ function toFormValues(project: ProjectDetail): ProjectFormValues {
   };
 }
 
-function UpdateCard({ update, onChanged }: { update: ProjectDetail["updates"][number]; onChanged: () => void }) {
+export function UpdateCard({
+  update,
+  onChanged,
+  readOnly = false,
+}: {
+  update: ProjectDetail["updates"][number];
+  onChanged?: () => void;
+  /** Initiative updates: shown, not editable here (they have their own mutations). */
+  readOnly?: boolean;
+}) {
   const rpc = useRpc<typeof rpcContract>();
   const options = useWriteOptions();
-  const mine = options !== null && update.authorId === options.viewer.id;
+  const mine = !readOnly && options !== null && update.authorId === options.viewer.id;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(update.body);
   const [busy, setBusy] = useState(false);
@@ -580,7 +589,7 @@ function UpdateCard({ update, onChanged }: { update: ProjectDetail["updates"][nu
     try {
       await run();
       setEditing(false);
-      onChanged();
+      onChanged?.();
     } catch (cause) {
       toast.error(errorText(cause));
     } finally {
