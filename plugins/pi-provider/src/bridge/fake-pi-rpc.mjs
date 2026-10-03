@@ -298,6 +298,11 @@ function extensionApi() {
     setActiveTools(names) {
       activeTools = [...names];
     },
+    // Test-only seam: /subagents background releases the scripted parent wait
+    // without aborting its independently tracked child.
+    releaseParentWait() {
+      holdAbort?.("background");
+    },
     events: eventBus,
   };
 }
@@ -368,13 +373,18 @@ async function runPrompt(text) {
   event({ type: "agent_start" });
   event({ type: "turn_start" });
   if (text === "/hold") {
+    if (process.env.FAKE_PI_COMMAND_CHILD_ON_HOLD === "1") {
+      await runExtensionTool("fake_command_child_spawn", {});
+    }
     const released = await new Promise((resolve) => {
       holdAbort = resolve;
     });
     holdAbort = null;
-    if (released === "steer") {
+    if (released === "steer" || released === "background") {
       const steerText =
-        process.env.FAKE_PI_DROP_STEER_AT_END === "1" ? null : steering.shift();
+        released === "background" || process.env.FAKE_PI_DROP_STEER_AT_END === "1"
+          ? null
+          : steering.shift();
       if (steerText !== null && steerText !== undefined) {
         queueUpdate();
       }
@@ -671,7 +681,14 @@ async function handle(command) {
         };
         try {
           await extensionCommand.handler(commandMatch[2] ?? "", ctx);
-        } catch {}
+        } catch (error) {
+          respondError(
+            id,
+            "prompt",
+            error instanceof Error ? error.message : String(error),
+          );
+          return;
+        }
         respond(id, "prompt");
         return;
       }
@@ -794,6 +811,7 @@ readLines(process.stdin, (line) => {
   if (
     command.type === "abort" ||
     command.type === "get_state" ||
+    command.type === "get_commands" ||
     command.type === "get_session_stats" ||
     (command.type === "prompt" && command.streamingBehavior === "steer")
   ) {

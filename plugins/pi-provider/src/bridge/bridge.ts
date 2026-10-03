@@ -1056,6 +1056,39 @@ async function isExtensionCommand(
   }
 }
 
+function observeExtensionCommand(
+  threadSession: ThreadSession,
+  threadId: string,
+  ownsTurn: boolean,
+  dispatch: ReturnType<PiRpcSession["runExtensionCommand"]>,
+): void {
+  void dispatch.settled.then((outcome) => {
+    if (outcome === null) return;
+    if (ownsTurn) {
+      // pi emits no agent run for it, so a top-level command owns its turn's edges.
+      reportPromptSettled({
+        ...(outcome.error !== undefined ? { error: outcome.error } : {}),
+        sessionSerial: threadSession.sessionSerial,
+        threadId,
+      });
+    } else if (outcome.error !== undefined) {
+      // A command sent as a steer belongs to the active parent turn. Do not
+      // close that turn; surface a handler failure as a provider notification.
+      const current = getCurrentThreadSession({
+        sessionSerial: threadSession.sessionSerial,
+        threadId,
+      });
+      if (current) {
+        sendSessionScopedError(
+          threadId,
+          current.providerThreadId,
+          outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+        );
+      }
+    }
+  });
+}
+
 async function startPiPrompt(
   threadSession: ThreadSession,
   threadId: string,
@@ -1064,16 +1097,17 @@ async function startPiPrompt(
 ): Promise<void> {
   const command = images.length === 0 && (await isExtensionCommand(threadSession, text));
   if (command) {
-    // pi emits no agent run for it, so this bridge owns the turn's edges.
     sendThreadDeltas(threadId, [{ kind: "turn.open" }]);
+    const dispatch = threadSession.session.runExtensionCommand(text);
+    observeExtensionCommand(threadSession, threadId, true, dispatch);
+    return dispatch.consumed;
   }
-  const dispatch = command
-    ? threadSession.session.runExtensionCommand(text)
-    : threadSession.session.prompt(text, images.length > 0 ? images : undefined);
+  const dispatch = threadSession.session.prompt(
+    text,
+    images.length > 0 ? images : undefined,
+  );
   void dispatch.settled.then((outcome) => {
-    if (outcome === null) {
-      return;
-    }
+    if (outcome === null) return;
     reportPromptSettled({
       ...(outcome.error !== undefined ? { error: outcome.error } : {}),
       sessionSerial: threadSession.sessionSerial,
@@ -1403,10 +1437,21 @@ async function handleTurnSteer(
     return;
   }
   try {
-    await threadSession.session.steer(
-      text,
-      images.length > 0 ? images : undefined,
-    );
+    const command =
+      images.length === 0 && (await isExtensionCommand(threadSession, text));
+    if (command) {
+      // RPC prompts with `steer` still execute registered extension commands in
+      // place. They must not enter the steering queue or manufacture another
+      // turn around the active parent run.
+      const dispatch = threadSession.session.runExtensionCommand(text, "steer");
+      observeExtensionCommand(threadSession, params.threadId, false, dispatch);
+      await dispatch.consumed;
+    } else {
+      await threadSession.session.steer(
+        text,
+        images.length > 0 ? images : undefined,
+      );
+    }
     sendThreadDeltas(params.threadId, [
       { kind: "input.accepted", clientRequestId: params.clientRequestId },
     ]);

@@ -361,7 +361,10 @@ export class PiRpcSession {
    * that answer; a run the handler started (`pi.sendMessage`) settles it
    * instead when it is still going.
    */
-  runExtensionCommand(text: string): PiInputDispatch {
+  runExtensionCommand(
+    text: string,
+    streamingBehavior?: "steer",
+  ): PiInputDispatch {
     const child = this.child;
     if (!child || child.exited) {
       const consumed = Promise.reject(new Error("No active Pi session"));
@@ -372,7 +375,11 @@ export class PiRpcSession {
     this.extensionCommandsInFlight += 1;
     const settled = this.dispatchWithTransientAuthRetry(
       child,
-      { type: "prompt", message: text },
+      {
+        type: "prompt",
+        message: text,
+        ...(streamingBehavior === undefined ? {} : { streamingBehavior }),
+      },
       NO_REQUEST_TIMEOUT,
     )
       .then(

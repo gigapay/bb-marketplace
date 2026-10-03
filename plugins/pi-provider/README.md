@@ -102,6 +102,8 @@ Pi runs an extension command (`pi.registerCommand`) sent through RPC `prompt` in
 
 Commands built only for Pi's interactive TUI (`ctx.ui.custom`, or a `ctx.mode !== "tui"` guard like gigapay/pi-extension-manager's `/extensions`) can't render in bb; you now see their notice instead of a stuck turn. Extension commands aren't listed in the `/` menu (bb's command roots need files), but typing them works.
 
+When `/subagents background` is sent during an active turn, it is dispatched as Pi's registered extension command rather than ordinary steering text. The parent wait yields cooperatively; sibling work and native child runs stay live and may settle later. This is distinct from **Stop**, which still cancels children. Update pi-toolbox to a version containing that command before using it; this repository change does not deploy or update Pi packages.
+
 ## Skills in the / menu
 
 bb scans the directories a provider declares or resolves on the host. Pi also loads skills it only learns about at runtime: `resources_discover` results from extensions (pi-toolbox or Claude marketplace generated skills), git and npm Pi packages, `settings.json` file entries. Upstream's resolver can't see those.

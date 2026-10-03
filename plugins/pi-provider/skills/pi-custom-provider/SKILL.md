@@ -34,6 +34,13 @@ never prompts, transcripts, paths, results, or errors. Runs a session restores
 as already finished are not shown again. A run that was live when Pi exited is
 settled as stopped.
 
+During an active parent turn, send `/subagents background` to release a
+model-facing subagent wait cooperatively. Its children and sibling work remain
+live and can finish after the parent yields; this is not **Stop**, which still
+cancels children. It requires a pi-toolbox package version that provides the
+command, so update that package first; changing this plugin alone does not
+deploy it.
+
 ## Skills in the / menu
 
 bb lists the skills Pi actually loaded, including ones Pi receives at runtime
