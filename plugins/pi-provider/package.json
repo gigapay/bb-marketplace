@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-pi-provider",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Run bb threads with Pi, with pi-toolbox subagents in bb's native agent display, a /reload command, and every skill Pi loads in the / menu.",
   "license": "MIT",
