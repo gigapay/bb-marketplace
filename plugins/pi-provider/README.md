@@ -89,7 +89,7 @@ Known limits:
 
 ## /reload
 
-Pi 0.87 has no RPC reload. Its `/reload` is interactive-only, and `ctx.reload()` exists only for extension command handlers, where it would also leave the bridge's FD 4 reader duplicated. So `/reload` restarts the thread's `pi --mode rpc` child through the same rebuild path the bundled provider already uses when execution settings change. It's the same session file and provider thread id, with the same cwd, model, thinking level, env, tools, and prompts.
+Pi's RPC protocol has no reload command. Its `/reload` is interactive-only, and `ctx.reload()` exists only for extension command handlers, where it would also leave the bridge's FD 4 reader duplicated. So `/reload` restarts the thread's `pi --mode rpc` child through the same rebuild path the bundled provider already uses when execution settings change. It's the same session file and provider thread id, with the same cwd, model, thinking level, env, tools, and prompts.
 
 - Input that is exactly `/reload`, typed or picked from the composer, is handled by the bridge and never sent to the model. `/reload now` is an ordinary prompt, and so is a skill named `reload`.
 - The host entry offers `/reload` in the composer as a `command-file` root under the provider state dir (`~/.bb/pi-provider/commands/reload.md`). It's scoped to this provider only.
