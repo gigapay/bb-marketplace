@@ -49,7 +49,14 @@ export const processListingSchema = z.object({
   processes: z.array(processSchema),
 });
 
+export const historyPointSchema = z.object({
+  at: z.number(),
+  cpuPercent: z.number(),
+  memoryPercent: z.number(),
+});
+
 export type MachineSnapshot = z.infer<typeof snapshotSchema>;
+export type HistoryPoint = z.infer<typeof historyPointSchema>;
 export type ProcessInfo = z.infer<typeof processSchema>;
 export type ProcessListing = z.infer<typeof processListingSchema>;
 export type DiskUsage = z.infer<typeof diskSchema>;

@@ -1,7 +1,10 @@
-// Top of the Machine card: live CPU, RAM and disk usage bars.
+// Usage tab of the Machine card, the hub: live CPU, RAM and disk bars, the
+// last minutes of CPU and RAM as charts, and the three busiest processes.
 import { useEffect, useState } from "react";
 import { useRpc } from "@get-bb/plugin-sdk/app";
-import type { MachineSnapshot, rpcContract } from "./server";
+import { useProcesses } from "./processes-card";
+import type { HistoryPoint, MachineSnapshot, rpcContract } from "./server";
+import { UsageChart } from "./usage-chart";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 
@@ -50,6 +53,42 @@ function formatUptime(seconds: number): string {
 }
 
 const ratio = (used: number, total: number) => (total > 0 ? (used / total) * 100 : 0);
+
+const HISTORY_POLL_MS = 5_000;
+
+// The server keeps the samples, so the charts are already filled when the
+// card reopens. Reading them costs no host call.
+function useHistory(hostId: string | null) {
+  const rpc = useRpc<typeof rpcContract>();
+  const [history, setHistory] = useState<{
+    windowMs: number;
+    intervalMs: number;
+    points: HistoryPoint[];
+  } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setHistory(null);
+    let cancelled = false;
+    const tick = () => {
+      if (document.visibilityState === "hidden") return;
+      rpc.call("machine_history", { hostId }).then(
+        (next) => {
+          if (cancelled) return;
+          setHistory(next);
+          setNow(Date.now());
+        },
+        () => {},
+      );
+    };
+    tick();
+    const timer = window.setInterval(tick, HISTORY_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [rpc, hostId]);
+  return { history, now };
+}
 
 function useSnapshot(hostId: string | null) {
   const rpc = useRpc<typeof rpcContract>();
@@ -146,14 +185,70 @@ function diskLabel(mount: string): string {
   return mount.split("/").filter(Boolean).at(-1) ?? mount;
 }
 
+function TopProcesses({
+  hostId,
+  onShowAll,
+}: {
+  hostId: string | null;
+  onShowAll: () => void;
+}) {
+  const { listing } = useProcesses(hostId, 3);
+  const rows = [...(listing?.processes ?? [])]
+    .sort((a, b) => b.cpuPercent - a.cpuPercent)
+    .slice(0, 3);
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-baseline gap-1 text-2xs leading-4">
+        <span className="min-w-0 flex-1 text-subtle-foreground">Top processes</span>
+        <button
+          type="button"
+          onClick={onShowAll}
+          className="shrink-0 rounded px-1 text-subtle-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        >
+          See all
+        </button>
+      </div>
+      {listing === null ? (
+        <p className="text-2xs text-muted-foreground">Reading processes…</p>
+      ) : (
+        <ul className="flex flex-col">
+          {rows.map((process) => (
+            <li
+              key={process.pid}
+              className="flex min-w-0 items-center gap-2 text-2xs leading-4"
+              title={[`PID ${process.pid}`, process.command].join("\n")}
+            >
+              <span className="min-w-0 flex-1 truncate text-sidebar-foreground">
+                {process.name}
+                {process.container !== null ? (
+                  <span className="ml-1 text-subtle-foreground">{process.container}</span>
+                ) : null}
+              </span>
+              <span className="w-10 shrink-0 text-right tabular-nums text-sidebar-foreground">
+                {process.cpuPercent.toFixed(process.cpuPercent >= 10 ? 0 : 1)}%
+              </span>
+              <span className="w-12 shrink-0 text-right tabular-nums text-subtle-foreground">
+                {formatBytes(process.memoryBytes)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function MachineStats({
   hostId,
   machineName,
+  onShowProcesses,
 }: {
   hostId: string | null;
   machineName: string | null;
+  onShowProcesses: () => void;
 }) {
   const { snapshot, error } = useSnapshot(hostId);
+  const { history, now } = useHistory(hostId);
 
   if (snapshot === null) {
     return (
@@ -197,6 +292,29 @@ export function MachineStats({
             title={`${disk.mount} (${disk.filesystem}) · ${formatBytes(disk.usedBytes)} used of ${formatBytes(disk.totalBytes)}`}
           />
         ))}
+      </div>
+      {history !== null ? (
+        <div className="flex flex-col gap-1.5 border-t border-sidebar-border pt-1.5">
+          <UsageChart
+            label={`CPU · ${Math.round(history.windowMs / 60_000)} min`}
+            metric="cpuPercent"
+            points={history.points}
+            windowMs={history.windowMs}
+            intervalMs={history.intervalMs}
+            now={now}
+          />
+          <UsageChart
+            label={`RAM · ${Math.round(history.windowMs / 60_000)} min`}
+            metric="memoryPercent"
+            points={history.points}
+            windowMs={history.windowMs}
+            intervalMs={history.intervalMs}
+            now={now}
+          />
+        </div>
+      ) : null}
+      <div className="border-t border-sidebar-border pt-1.5">
+        <TopProcesses hostId={hostId} onShowAll={onShowProcesses} />
       </div>
       <div className="flex items-center gap-1 text-2xs text-subtle-foreground">
         <span className="min-w-0 flex-1 truncate" title={snapshot.platform}>

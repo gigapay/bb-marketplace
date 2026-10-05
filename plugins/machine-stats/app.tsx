@@ -1,6 +1,6 @@
 // Machine card in the sidebar footer, next to Usage Bar, for the machine
-// running the open thread (or the server). Three tabs: live CPU, RAM and disk
-// usage, the busiest processes, and the staging slugs and Traefik services.
+// running the open thread (or the server). Three tabs: Usage is the hub (bars,
+// charts, top processes), Processes the full list, Slugs the staging stacks.
 import { useState } from "react";
 import {
   definePluginApp,
@@ -61,7 +61,13 @@ function MachineCard() {
           </button>
         ))}
       </div>
-      {tab === "usage" ? <MachineStats hostId={machine.hostId} machineName={machine.name} /> : null}
+      {tab === "usage" ? (
+        <MachineStats
+          hostId={machine.hostId}
+          machineName={machine.name}
+          onShowProcesses={() => choose("processes")}
+        />
+      ) : null}
       {tab === "processes" ? <ProcessList hostId={machine.hostId} /> : null}
       {tab === "slugs" ? <TraefikStacks hostId={machine.hostId} /> : null}
     </div>
