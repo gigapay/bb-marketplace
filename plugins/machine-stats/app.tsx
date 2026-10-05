@@ -1,12 +1,13 @@
 // Machine card in the sidebar footer, next to Usage Bar, for the machine
-// running the open thread (or the server). Three tabs: Usage is the hub (bars,
-// charts, top processes), Processes the full list, Slugs the staging stacks.
+// running the open thread (or the server). Usage is the hub (bars, charts, top
+// processes); Processes, Disk and Slugs are the details.
 import { useState } from "react";
 import {
   definePluginApp,
   experimental_useSidebarThreads,
   useBbContext,
 } from "@get-bb/plugin-sdk/app";
+import { DiskUsage } from "./disk-card";
 import { ProcessList } from "./processes-card";
 import { TraefikStacks } from "./stacks-card";
 import { MachineStats } from "./stats-card";
@@ -15,6 +16,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { id: "usage", label: "Usage" },
   { id: "processes", label: "Processes" },
+  { id: "disk", label: "Disk" },
   { id: "slugs", label: "Slugs" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -69,6 +71,7 @@ function MachineCard() {
         />
       ) : null}
       {tab === "processes" ? <ProcessList hostId={machine.hostId} /> : null}
+      {tab === "disk" ? <DiskUsage hostId={machine.hostId} /> : null}
       {tab === "slugs" ? <TraefikStacks hostId={machine.hostId} /> : null}
     </div>
   );

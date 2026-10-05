@@ -13,23 +13,36 @@ import {
   listingSchema,
   slugSchema,
   repoSchema,
+  diskLevelSchema,
+  diskPathSchema,
   historyPointSchema,
   processListingSchema,
   snapshotSchema,
   type CleanupStatus,
+  type DiskLevel,
   type HistoryPoint,
   type MachineSnapshot,
   type ProcessListing,
   type Stack,
   type StackListing,
 } from "./contract.js";
+import { createDiskScanner } from "./disk-scan.js";
 
-export type { CleanupStatus, HistoryPoint, MachineSnapshot, ProcessListing, Stack, StackListing };
+export type { CleanupStatus, DiskLevel, HistoryPoint, MachineSnapshot, ProcessListing, Stack, StackListing };
 
 // A null hostId reads the server machine.
 const hostIdSchema = z.string().min(1).max(200).nullable();
 
 export const rpcContract = defineRpcContract({
+  // Starts or joins a background scan and returns what's measured so far.
+  disk_level: {
+    input: z.object({
+      hostId: hostIdSchema,
+      path: diskPathSchema.nullable(),
+      rescan: z.boolean().optional(),
+    }),
+    output: diskLevelSchema,
+  },
   machine_history: {
     input: z.object({ hostId: hostIdSchema }),
     output: z.object({ windowMs: z.number(), intervalMs: z.number(), points: z.array(historyPointSchema) }),
@@ -217,6 +230,17 @@ export default async function plugin(bb: BbPluginApi) {
     },
   });
 
+  const diskLevelOf = createDiskScanner({
+    root: async (hostId) =>
+      (await host.call("disk_root", {}, { hostId, signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) })).path,
+    list: (hostId, path, signal) => host.call("disk_list", { path }, { hostId, signal }),
+    du: (hostId, path, signal) => host.call("disk_du", { path }, { hostId, signal }),
+  });
+
+  async function diskLevel(hostId: string | null, path: string | null, rescan = false): Promise<DiskLevel> {
+    return diskLevelOf(await resolveHostId(hostId), path, rescan);
+  }
+
   async function topProcesses(hostId: string | null, limit = 15): Promise<ProcessListing> {
     return host.call(
       "processes",
@@ -273,6 +297,7 @@ export default async function plugin(bb: BbPluginApi) {
   bb.rpc.register(rpcContract, {
     machine_snapshot: ({ hostId }) => snapshot(hostId),
     machine_history: ({ hostId }) => machineHistory(hostId),
+    disk_level: ({ hostId, path, rescan }) => diskLevel(hostId, path, rescan),
     top_processes: ({ hostId, limit }) => topProcesses(hostId, limit),
     list_stacks: ({ hostId }) => listStacks(hostId),
     destroy_stack: ({ hostId, slug }) => destroyStack(hostId, slug),
@@ -284,6 +309,7 @@ export default async function plugin(bb: BbPluginApi) {
     "  bb machine-stats machines [--json]",
     "  bb machine-stats show [<host-id>] [--json]",
     "  bb machine-stats top [--memory] [--host <host-id>] [--json]",
+    "  bb machine-stats disk [<path>] [--rescan] [--host <host-id>] [--json]",
     "  bb machine-stats stacks [--cleanup] [--host <host-id>] [--json]",
     "  bb machine-stats destroy <slug> --yes [--host <host-id>] [--json]",
   ].join("\n");
@@ -306,6 +332,11 @@ export default async function plugin(bb: BbPluginApi) {
         name: "top",
         summary: "Top processes by CPU, or by memory with --memory (defaults to the server machine)",
         usage: "bb machine-stats top [--memory] [--host <host-id>] [--json]",
+      },
+      {
+        name: "disk",
+        summary: "Folder sizes under a path, largest first (defaults to / on Linux, ~ on macOS); waits for the scan",
+        usage: "bb machine-stats disk [<path>] [--rescan] [--host <host-id>] [--json]",
       },
       {
         name: "stacks",
@@ -331,6 +362,7 @@ export default async function plugin(bb: BbPluginApi) {
       const yes = take("--yes");
       const withCleanup = take("--cleanup");
       const byMemory = take("--memory");
+      const rescan = take("--rescan");
       let hostId: string | null = null;
       const hostIndex = args.indexOf("--host");
       if (hostIndex !== -1) {
@@ -388,6 +420,31 @@ export default async function plugin(bb: BbPluginApi) {
                 ` ${p.name}${p.container !== null ? `  [${p.container}]` : ""}`,
               ].join(" "),
             ),
+          ];
+          return { exitCode: 0, stdout: lines.join("\n") };
+        }
+        case "disk": {
+          if (rest.length > 1) break;
+          const requested = rest[0] ?? null;
+          if (requested !== null && !diskPathSchema.safeParse(requested).success) {
+            return { exitCode: 1, stderr: `Use an absolute path: ${requested}` };
+          }
+          let level = await diskLevel(hostId, requested, rescan);
+          while (level.scanning) {
+            await new Promise((resolve) => setTimeout(resolve, 2_000));
+            level = await diskLevel(hostId, level.path);
+          }
+          if (json) return { exitCode: 0, stdout: JSON.stringify(level) };
+          if (level.error !== null) return { exitCode: 1, stderr: level.error };
+          const lines = [
+            `${level.path}${level.partial ? "  (some folders unreadable, sizes are a floor)" : ""}`,
+            "",
+            ...level.entries.map((entry) => {
+              const size = entry.bytes === null ? "-" : formatBytes(entry.bytes);
+              const name =
+                entry.kind === "files" ? "(files)" : entry.kind === "mount" ? `${entry.name}/  (other mount)` : `${entry.name}/`;
+              return `${size.padStart(9)}  ${name}`;
+            }),
           ];
           return { exitCode: 0, stdout: lines.join("\n") };
         }
