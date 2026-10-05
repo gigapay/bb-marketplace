@@ -3,6 +3,7 @@
 import { experimental_defineHostEntry } from "@get-bb/plugin-sdk/host";
 import { hostContract } from "./contract.js";
 import { cleanupStatus } from "./host-cleanup.js";
+import { listProcesses } from "./host-processes.js";
 import { destroyStack, listStacks } from "./host-stacks.js";
 import { snapshot } from "./host-stats.js";
 
@@ -10,6 +11,7 @@ export default experimental_defineHostEntry({
   contract: hostContract,
   handlers: {
     snapshot: (_input, context) => snapshot(context.signal),
+    processes: ({ limit }, context) => listProcesses(limit, context.signal),
     list_stacks: (_input, context) => listStacks(context.signal),
     destroy_stack: ({ slug }, context) => destroyStack(slug, context.signal),
     cleanup_status: ({ slugs, repos }, context) => cleanupStatus(slugs, repos, context.signal),

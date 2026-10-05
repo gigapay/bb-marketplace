@@ -29,7 +29,29 @@ export const snapshotSchema = z.object({
   disks: z.array(diskSchema),
 });
 
+export const processSchema = z.object({
+  pid: z.number(),
+  name: z.string(),
+  command: z.string(),
+  // Percent of one core, like top: a busy multithreaded process can pass 100.
+  cpuPercent: z.number(),
+  memoryBytes: z.number(),
+  // "gig-6565 · django" when the process runs in a docker container.
+  container: z.string().nullable(),
+});
+
+export const processListingSchema = z.object({
+  hostname: z.string(),
+  sampledAt: z.number(),
+  cores: z.number(),
+  totalMemoryBytes: z.number(),
+  processCount: z.number(),
+  processes: z.array(processSchema),
+});
+
 export type MachineSnapshot = z.infer<typeof snapshotSchema>;
+export type ProcessInfo = z.infer<typeof processSchema>;
+export type ProcessListing = z.infer<typeof processListingSchema>;
 export type DiskUsage = z.infer<typeof diskSchema>;
 
 // Same shape create-worktree.sh produces: lowercase ticket slugs like gig-5697.
@@ -107,6 +129,10 @@ export const hostContract = defineRpcContract({
   snapshot: {
     input: z.object({}).strict(),
     output: snapshotSchema,
+  },
+  processes: {
+    input: z.object({ limit: z.number().int().min(1).max(50) }).strict(),
+    output: processListingSchema,
   },
   list_stacks: {
     input: z.object({}).strict(),
