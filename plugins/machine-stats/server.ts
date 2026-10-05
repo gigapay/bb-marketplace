@@ -13,19 +13,25 @@ import {
   listingSchema,
   slugSchema,
   repoSchema,
+  processListingSchema,
   snapshotSchema,
   type CleanupStatus,
   type MachineSnapshot,
+  type ProcessListing,
   type Stack,
   type StackListing,
 } from "./contract.js";
 
-export type { CleanupStatus, MachineSnapshot, Stack, StackListing };
+export type { CleanupStatus, MachineSnapshot, ProcessListing, Stack, StackListing };
 
 // A null hostId reads the server machine.
 const hostIdSchema = z.string().min(1).max(200).nullable();
 
 export const rpcContract = defineRpcContract({
+  top_processes: {
+    input: z.object({ hostId: hostIdSchema, limit: z.number().int().min(1).max(50).optional() }),
+    output: processListingSchema,
+  },
   machine_snapshot: {
     input: z.object({ hostId: hostIdSchema }),
     output: snapshotSchema,
@@ -140,6 +146,14 @@ export default async function plugin(bb: BbPluginApi) {
     );
   }
 
+  async function topProcesses(hostId: string | null, limit = 15): Promise<ProcessListing> {
+    return host.call(
+      "processes",
+      { limit },
+      { hostId: await resolveHostId(hostId), signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) },
+    );
+  }
+
   async function listStacks(hostId: string | null): Promise<StackListing> {
     return host.call(
       "list_stacks",
@@ -187,6 +201,7 @@ export default async function plugin(bb: BbPluginApi) {
 
   bb.rpc.register(rpcContract, {
     machine_snapshot: ({ hostId }) => snapshot(hostId),
+    top_processes: ({ hostId, limit }) => topProcesses(hostId, limit),
     list_stacks: ({ hostId }) => listStacks(hostId),
     destroy_stack: ({ hostId, slug }) => destroyStack(hostId, slug),
     cleanup_status: ({ hostId, slugs, fresh }) => cleanupStatus(hostId, slugs, fresh),
@@ -196,6 +211,7 @@ export default async function plugin(bb: BbPluginApi) {
     "Usage:",
     "  bb machine-stats machines [--json]",
     "  bb machine-stats show [<host-id>] [--json]",
+    "  bb machine-stats top [--memory] [--host <host-id>] [--json]",
     "  bb machine-stats stacks [--cleanup] [--host <host-id>] [--json]",
     "  bb machine-stats destroy <slug> --yes [--host <host-id>] [--json]",
   ].join("\n");
@@ -213,6 +229,11 @@ export default async function plugin(bb: BbPluginApi) {
         name: "show",
         summary: "Show usage of one machine (defaults to the server machine)",
         usage: "bb machine-stats show [<host-id>] [--json]",
+      },
+      {
+        name: "top",
+        summary: "Top processes by CPU, or by memory with --memory (defaults to the server machine)",
+        usage: "bb machine-stats top [--memory] [--host <host-id>] [--json]",
       },
       {
         name: "stacks",
@@ -237,6 +258,7 @@ export default async function plugin(bb: BbPluginApi) {
       const json = take("--json");
       const yes = take("--yes");
       const withCleanup = take("--cleanup");
+      const byMemory = take("--memory");
       let hostId: string | null = null;
       const hostIndex = args.indexOf("--host");
       if (hostIndex !== -1) {
@@ -271,6 +293,28 @@ export default async function plugin(bb: BbPluginApi) {
             ...s.disks.map(
               (d) =>
                 `Disk  ${percent(d.usedBytes, d.usedBytes + d.availableBytes)}  ${formatBytes(d.usedBytes)} / ${formatBytes(d.totalBytes)}  ${d.mount}`,
+            ),
+          ];
+          return { exitCode: 0, stdout: lines.join("\n") };
+        }
+        case "top": {
+          if (rest.length > 0) break;
+          const listing = await topProcesses(hostId);
+          if (json) return { exitCode: 0, stdout: JSON.stringify(listing) };
+          const sorted = [...listing.processes]
+            .sort((a, b) => (byMemory ? b.memoryBytes - a.memoryBytes : b.cpuPercent - a.cpuPercent))
+            .slice(0, 15);
+          const lines = [
+            `${listing.hostname}  ${listing.processCount} processes  ${listing.cores} cores`,
+            "",
+            "   PID   CPU%      MEM  NAME",
+            ...sorted.map((p) =>
+              [
+                String(p.pid).padStart(6),
+                p.cpuPercent.toFixed(1).padStart(6),
+                formatBytes(p.memoryBytes).padStart(8),
+                ` ${p.name}${p.container !== null ? `  [${p.container}]` : ""}`,
+              ].join(" "),
             ),
           ];
           return { exitCode: 0, stdout: lines.join("\n") };
