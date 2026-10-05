@@ -44,6 +44,45 @@ function fileId(path: string): string {
 const REVIEWED_CLASS = "text-indigo-400";
 const UPDATED_DOT_CLASS = "bg-orange-400";
 
+function scrollParent(element: Element): Element | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight) return node;
+  }
+  return null;
+}
+
+/**
+ * Scrolls a file card to the top and keeps it there while the page settles.
+ * Files render lazily, so cards above the target grow as they mount and push
+ * it down; a single scrollIntoView (smooth even more so) lands short. This
+ * re-aims every frame for a moment, and stops as soon as the user scrolls.
+ */
+function settleOnFile(path: string) {
+  const started = performance.now();
+  let cancelled = false;
+  const cancel = () => {
+    cancelled = true;
+  };
+  window.addEventListener("wheel", cancel, { once: true, passive: true });
+  window.addEventListener("touchstart", cancel, { once: true, passive: true });
+  window.addEventListener("keydown", cancel, { once: true });
+  const step = () => {
+    const element = document.getElementById(fileId(path));
+    if (cancelled || element === null) return;
+    const scroller = scrollParent(element);
+    const top = scroller?.getBoundingClientRect().top ?? 0;
+    if (Math.abs(element.getBoundingClientRect().top - top) > 12) element.scrollIntoView({ block: "start" });
+    if (performance.now() - started < 1500) requestAnimationFrame(step);
+    else {
+      window.removeEventListener("wheel", cancel);
+      window.removeEventListener("touchstart", cancel);
+      window.removeEventListener("keydown", cancel);
+    }
+  };
+  requestAnimationFrame(step);
+}
+
 // Keeps the active tree row visible as the diff scrolls past many files.
 function scrollTreeRowIntoView(element: HTMLButtonElement | null) {
   element?.scrollIntoView({ block: "nearest" });
@@ -214,12 +253,13 @@ export function PrDiffView({
     restored.current = true;
     const path = readUi(`file.${pr.key}`, "", isString);
     if (path === "" || !orderedPaths.includes(path) || path === orderedPaths[0]) return;
-    requestAnimationFrame(() => document.getElementById(fileId(path))?.scrollIntoView({ block: "start" }));
+    settleOnFile(path);
   }, [orderedPaths, pr.key]);
 
   const jumpTo = (file: DiffFile) => {
     setExpandedOverride((current) => new Map(current).set(file.path, true));
-    requestAnimationFrame(() => document.getElementById(fileId(file.path))?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    setActivePath(file.path);
+    settleOnFile(file.path);
   };
 
   const commits = diff?.commits ?? [];
