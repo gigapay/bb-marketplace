@@ -13,7 +13,7 @@ const SORT_KEY = "machine-stats:process-sort";
 
 type Sort = "cpu" | "memory";
 
-function useProcesses(hostId: string | null) {
+export function useProcesses(hostId: string | null, limit = SHOWN) {
   const rpc = useRpc<typeof rpcContract>();
   const [listing, setListing] = useState<ProcessListing | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +26,7 @@ function useProcesses(hostId: string | null) {
       if (inFlight || document.visibilityState === "hidden") return;
       inFlight = true;
       rpc
-        .call("top_processes", { hostId, limit: SHOWN })
+        .call("top_processes", { hostId, limit })
         .then(
           (next) => {
             if (cancelled) return;
@@ -47,7 +47,7 @@ function useProcesses(hostId: string | null) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [rpc, hostId]);
+  }, [rpc, hostId, limit]);
   return { listing, error };
 }
 

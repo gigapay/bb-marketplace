@@ -13,21 +13,27 @@ import {
   listingSchema,
   slugSchema,
   repoSchema,
+  historyPointSchema,
   processListingSchema,
   snapshotSchema,
   type CleanupStatus,
+  type HistoryPoint,
   type MachineSnapshot,
   type ProcessListing,
   type Stack,
   type StackListing,
 } from "./contract.js";
 
-export type { CleanupStatus, MachineSnapshot, ProcessListing, Stack, StackListing };
+export type { CleanupStatus, HistoryPoint, MachineSnapshot, ProcessListing, Stack, StackListing };
 
 // A null hostId reads the server machine.
 const hostIdSchema = z.string().min(1).max(200).nullable();
 
 export const rpcContract = defineRpcContract({
+  machine_history: {
+    input: z.object({ hostId: hostIdSchema }),
+    output: z.object({ windowMs: z.number(), intervalMs: z.number(), points: z.array(historyPointSchema) }),
+  },
   top_processes: {
     input: z.object({ hostId: hostIdSchema, limit: z.number().int().min(1).max(50).optional() }),
     output: processListingSchema,
@@ -56,6 +62,10 @@ export const rpcContract = defineRpcContract({
 });
 
 const SNAPSHOT_TIMEOUT_MS = 15_000;
+// The Usage charts' window. A machine is sampled in the background for this
+// long after someone last looked at it, so closing the card leaves no hole.
+const HISTORY_WINDOW_MS = 15 * 60_000;
+const HISTORY_INTERVAL_MS = 5_000;
 const LIST_TIMEOUT_MS = 20_000;
 // Two sequential `compose down`s, each capped at three minutes on the host.
 const DESTROY_TIMEOUT_MS = 400_000;
@@ -138,13 +148,74 @@ export default async function plugin(bb: BbPluginApi) {
     return hostId;
   }
 
-  async function snapshot(hostId: string | null): Promise<MachineSnapshot> {
-    return host.call(
+  // hostId -> recent samples, plus when the machine was last looked at.
+  const history = new Map<string, { points: HistoryPoint[]; watchedAt: number }>();
+
+  function historyOf(hostId: string) {
+    const entry = history.get(hostId) ?? { points: [], watchedAt: 0 };
+    history.set(hostId, entry);
+    return entry;
+  }
+
+  function record(hostId: string, s: MachineSnapshot) {
+    const entry = historyOf(hostId);
+    const last = entry.points.at(-1);
+    // The card polls every 3s and the sampler every 5s; one point is enough.
+    if (last !== undefined && s.sampledAt - last.at < HISTORY_INTERVAL_MS / 2) return;
+    entry.points.push({
+      at: s.sampledAt,
+      cpuPercent: s.cpu.usagePercent,
+      memoryPercent: s.memory.totalBytes > 0 ? (s.memory.usedBytes / s.memory.totalBytes) * 100 : 0,
+    });
+    const cutoff = s.sampledAt - HISTORY_WINDOW_MS;
+    while ((entry.points[0]?.at ?? Infinity) < cutoff) entry.points.shift();
+  }
+
+  async function sampleHost(hostId: string): Promise<MachineSnapshot> {
+    const s = await host.call(
       "snapshot",
       {},
-      { hostId: await resolveHostId(hostId), signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) },
+      { hostId, signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) },
     );
+    record(hostId, s);
+    return s;
   }
+
+  async function snapshot(hostId: string | null): Promise<MachineSnapshot> {
+    const target = await resolveHostId(hostId);
+    historyOf(target).watchedAt = Date.now();
+    return sampleHost(target);
+  }
+
+  async function machineHistory(hostId: string | null) {
+    const target = await resolveHostId(hostId);
+    const entry = historyOf(target);
+    entry.watchedAt = Date.now();
+    return { windowMs: HISTORY_WINDOW_MS, intervalMs: HISTORY_INTERVAL_MS, points: entry.points };
+  }
+
+  bb.background.service("history-sampler", {
+    async start(signal) {
+      while (!signal.aborted) {
+        const now = Date.now();
+        // Skip machines the open card sampled a moment ago.
+        const watched = [...history].filter(
+          ([, entry]) =>
+            now - entry.watchedAt < HISTORY_WINDOW_MS &&
+            now - (entry.points.at(-1)?.at ?? 0) > HISTORY_INTERVAL_MS * 0.8,
+        );
+        // A machine that dropped off just leaves a gap in its chart.
+        await Promise.allSettled(watched.map(([hostId]) => sampleHost(hostId)));
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, HISTORY_INTERVAL_MS);
+          signal.addEventListener("abort", () => {
+            clearTimeout(timer);
+            resolve();
+          }, { once: true });
+        });
+      }
+    },
+  });
 
   async function topProcesses(hostId: string | null, limit = 15): Promise<ProcessListing> {
     return host.call(
@@ -201,6 +272,7 @@ export default async function plugin(bb: BbPluginApi) {
 
   bb.rpc.register(rpcContract, {
     machine_snapshot: ({ hostId }) => snapshot(hostId),
+    machine_history: ({ hostId }) => machineHistory(hostId),
     top_processes: ({ hostId, limit }) => topProcesses(hostId, limit),
     list_stacks: ({ hostId }) => listStacks(hostId),
     destroy_stack: ({ hostId, slug }) => destroyStack(hostId, slug),

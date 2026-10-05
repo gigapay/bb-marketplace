@@ -4,7 +4,9 @@ A BB plugin that shows how the machine behind your thread is doing, and what's r
 
 The card has three tabs, and it remembers the last one you opened.
 
-Usage has one bar for CPU, one for RAM, and one per disk. Hover a row for the details (CPU model and load average, available memory, device and mount point).
+Usage is the hub. It has one bar for CPU, one for RAM, and one per disk (hover a row for the CPU model, load average, available memory, device and mount point), then a chart each for CPU and RAM over the last 15 minutes, and the three busiest processes with a link to the full list. Hover a chart to read the value at a given time.
+
+The server keeps the chart samples, taken every 5 seconds for any machine someone looked at in the last 15 minutes. So closing the card doesn't leave a hole, and nothing is sampled once nobody's watching. A gap in the line means the machine wasn't reachable or nobody had the card open.
 
 Processes lists the busiest processes, sorted by CPU or RAM (toggle in the tab). A process running in a docker container shows its compose project and service next to its name (`gig-6565 · django`), so you can tell which slug is eating the machine. Hover a row for the PID and full command line. CPU is a percent of one core, like `top`, so a multithreaded process can pass 100%.
 
