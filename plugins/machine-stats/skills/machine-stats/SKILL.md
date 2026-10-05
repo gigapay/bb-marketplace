@@ -14,6 +14,7 @@ The Machine Stats plugin reads live CPU, memory and disk figures and the docker 
 | `bb machine-stats machines` | List connected machines with their host ids. `(server)` marks the BB server's machine. |
 | `bb machine-stats show [<host-id>]` | CPU, RAM and disk usage of the server machine, or of one specific machine. |
 | `bb machine-stats top [--memory] [--host <host-id>]` | The 15 busiest processes by CPU (or memory), with their docker container (`gig-6565 · django`) when they run in one. |
+| `bb machine-stats disk [<path>] [--rescan] [--host <host-id>]` | Folder sizes under a path, largest first (`/` on Linux, `~` on macOS). Waits for the scan, which can take minutes on `/`; a deeper, smaller path is much faster. |
 | `bb machine-stats stacks [--host <host-id>]` | Staging slugs and Traefik services, with running/total containers and Traefik hosts. |
 | `bb machine-stats stacks --cleanup [--host <host-id>]` | Same, plus whether each slug's Linear ticket is done and its PRs merged (`READY TO DESTROY`). |
 | `bb machine-stats destroy <slug> --yes [--host <host-id>]` | `docker compose -p <project> down --volumes --remove-orphans` for the slug's frontend then backend project. |
