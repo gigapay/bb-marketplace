@@ -10,7 +10,8 @@ const CACHE_MS = 15 * 60_000;
 const CONCURRENCY = 2;
 // Past this many subfolders (node_modules...), one du of the parent is faster.
 const MAX_PER_CHILD = 64;
-const DU_TIMEOUT_MS = 16 * 60_000;
+// A whole level: many subfolders, two du at a time, each capped on the host.
+const LEVEL_TIMEOUT_MS = 60 * 60_000;
 
 type Level = {
   path: string;
@@ -19,6 +20,9 @@ type Level = {
   scannedAt: number | null;
   partial: boolean;
   error: string | null;
+  // Built from the parent's du: folder sizes are known, but not the big
+  // files or mounts, so opening it still runs a (cheap) listing.
+  derived: boolean;
 };
 
 export type DiskHost = {
@@ -59,10 +63,15 @@ export function createDiskScanner(host: DiskHost) {
     const entries = new Map<string, DiskEntry>();
     let childBytes = 0;
     for (const child of result.children) {
-      entries.set(child.name, { name: child.name, kind: "dir", bytes: child.bytes });
+      entries.set(child.name, { name: child.name, kind: "dir", bytes: child.bytes, unreadable: false });
       childBytes += child.bytes;
     }
-    entries.set("", { name: "", kind: "files", bytes: Math.max(0, result.totalBytes - childBytes) });
+    entries.set("", {
+      name: "",
+      kind: "files",
+      bytes: Math.max(0, result.totalBytes - childBytes),
+      unreadable: false,
+    });
     levels.set(keyOf(hostId, result.path), {
       path: result.path,
       entries,
@@ -70,20 +79,29 @@ export function createDiskScanner(host: DiskHost) {
       scannedAt: Date.now(),
       partial: result.partial,
       error: null,
+      derived: true,
     });
   }
 
-  async function scan(hostId: string, level: Level) {
-    const signal = AbortSignal.timeout(DU_TIMEOUT_MS);
+  async function scan(hostId: string, level: Level, known: Map<string, number>) {
+    const signal = AbortSignal.timeout(LEVEL_TIMEOUT_MS);
     try {
       const listing = await host.list(hostId, level.path, signal);
       level.partial = listing.unreadable;
       level.entries = new Map();
-      for (const name of listing.dirs) level.entries.set(name, { name, kind: "dir", bytes: null });
-      for (const name of listing.mounts) level.entries.set(name, { name, kind: "mount", bytes: null });
-      level.entries.set("", { name: "", kind: "files", bytes: listing.filesBytes });
+      const entry = (name: string, kind: DiskEntry["kind"], bytes: number | null): DiskEntry => ({
+        name,
+        kind,
+        bytes,
+        unreadable: false,
+      });
+      for (const name of listing.dirs) level.entries.set(name, entry(name, "dir", known.get(name) ?? null));
+      for (const name of listing.mounts) level.entries.set(name, entry(name, "mount", null));
+      for (const file of listing.files) level.entries.set(`file:${file.name}`, entry(file.name, "file", file.bytes));
+      level.entries.set("", entry("", "files", listing.filesBytes));
 
-      if (listing.dirs.length > MAX_PER_CHILD) {
+      const unknown = listing.dirs.filter((name) => !known.has(name));
+      if (unknown.length > MAX_PER_CHILD) {
         const result = await limited(hostId, () => host.du(hostId, level.path, signal));
         level.partial ||= result.partial;
         for (const child of result.children) {
@@ -92,7 +110,7 @@ export function createDiskScanner(host: DiskHost) {
         }
       } else {
         await Promise.all(
-          listing.dirs.map((name) =>
+          unknown.map((name) =>
             limited(hostId, async () => {
               const result = await host.du(hostId, path.join(level.path, name), signal);
               const entry = level.entries.get(name);
@@ -100,10 +118,11 @@ export function createDiskScanner(host: DiskHost) {
               level.partial ||= result.partial;
               storeFromDu(hostId, result);
             }).catch(() => {
-              // One unreadable subfolder shouldn't sink the whole level.
+              // One failed subfolder shouldn't sink the whole level, but it
+              // must not pass for an empty one either.
               level.partial = true;
               const entry = level.entries.get(name);
-              if (entry !== undefined) entry.bytes = 0;
+              if (entry !== undefined) entry.unreadable = true;
             }),
           ),
         );
@@ -119,10 +138,7 @@ export function createDiskScanner(host: DiskHost) {
   function view(level: Level, rootPath: string): DiskLevel {
     const entries = [...level.entries.values()]
       .filter((entry) => entry.kind !== "files" || (entry.bytes ?? 0) > 0)
-      .sort(
-        (a, b) =>
-          (b.bytes ?? -1) - (a.bytes ?? -1) || a.name.localeCompare(b.name),
-      );
+      .sort((a, b) => (b.bytes ?? -1) - (a.bytes ?? -1) || a.name.localeCompare(b.name));
     return {
       path: level.path,
       rootPath,
@@ -153,19 +169,27 @@ export function createDiskScanner(host: DiskHost) {
         (existing.error === null &&
           existing.scannedAt !== null &&
           Date.now() - existing.scannedAt < CACHE_MS));
-    if (existing !== undefined && fresh && !(rescan && !existing.scanning)) {
+    if (existing !== undefined && fresh && !existing.derived && !(rescan && !existing.scanning)) {
       return view(existing, rootPath);
+    }
+    // Reuse a fresh parent du's folder sizes; a rescan measures everything.
+    const known = new Map<string, number>();
+    if (existing?.derived && fresh && !rescan) {
+      for (const entry of existing.entries.values()) {
+        if (entry.kind === "dir" && entry.bytes !== null) known.set(entry.name, entry.bytes);
+      }
     }
     const level: Level = {
       path: dir,
       entries: existing?.entries ?? new Map(),
       scanning: true,
       scannedAt: existing?.scannedAt ?? null,
-      partial: false,
+      partial: existing?.derived ? existing.partial : false,
       error: null,
+      derived: false,
     };
     levels.set(key, level);
-    void scan(hostId, level);
+    void scan(hostId, level, known);
     return view(level, rootPath);
   };
 }
