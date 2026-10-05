@@ -41,17 +41,40 @@ function sleep(ms: number, signal: AbortSignal) {
 // `node`, `python3.12`, `MainThread`... say nothing; the script they run does.
 const INTERPRETER = /^(node|nodejs|bun|deno|python[\d.]*|ruby|perl|php|java|sh|bash|zsh|MainThread)$/;
 
+// Entry files named like this say less than the package or folder they're in.
+const GENERIC_ENTRY = /^(index|cli|main|bin|run|start|entry|dispatcher|server)$/;
+const SCRIPT_EXT = /\.(m?js|cjs|ts|py|rb|sh)$/;
+
 function scriptName(args: string[]): string | null {
-  const script = args.slice(1).find((arg) => !arg.startsWith("-"));
-  if (script === undefined) return null;
-  // .../node_modules/@scope/pkg/dist/bin.js -> @scope/pkg
-  const modules = script.lastIndexOf("node_modules/");
-  if (modules !== -1) {
-    const parts = script.slice(modules + "node_modules/".length).split("/");
-    const pkg = parts[0]?.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
-    if (pkg !== undefined && pkg !== ".bin") return pkg;
+  let rest = args.slice(1);
+  // Wrapper chains (a bash shim named `node` running node running cli.js)
+  // are followed down to the first real script.
+  for (let depth = 0; depth < 4; depth += 1) {
+    const index = rest.findIndex((arg) => !arg.startsWith("-"));
+    const script = rest[index];
+    if (script === undefined) return null;
+    // sh -c "node server.js": the command string's first word.
+    if (rest[index - 1] === "-c") {
+      rest = script.split(/\s+/);
+      continue;
+    }
+    const base = path.basename(script).replace(SCRIPT_EXT, "");
+    if (INTERPRETER.test(base)) {
+      rest = rest.slice(index + 1);
+      continue;
+    }
+    if (!GENERIC_ENTRY.test(base)) return base || null;
+    // .../node_modules/@scope/pkg/dist/cli.js -> @scope/pkg
+    const modules = script.lastIndexOf("node_modules/");
+    if (modules !== -1) {
+      const parts = script.slice(modules + "node_modules/".length).split("/");
+      const pkg = parts[0]?.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+      if (pkg !== undefined && pkg !== "" && pkg !== ".bin") return pkg;
+    }
+    const folder = path.basename(path.dirname(script));
+    return folder !== "" && folder !== "." && folder !== "dist" ? `${folder}/${base}` : base;
   }
-  return path.basename(script).replace(/\.(m?js|cjs|ts|py|rb)$/, "") || null;
+  return null;
 }
 
 function displayName(name: string, args: string[]): string {
