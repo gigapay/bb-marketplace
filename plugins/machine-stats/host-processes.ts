@@ -9,7 +9,8 @@ import { promisify } from "node:util";
 import type { ProcessInfo, ProcessListing } from "./contract.js";
 
 const run = promisify(execFile);
-const SAMPLE_MS = 500;
+// Long enough that one clock tick is 1%, not noise on an idle shell.
+const SAMPLE_MS = 1_000;
 // Linux reports CPU time in clock ticks, which is 100/s on every distro BB runs on.
 const CLOCK_TICKS = 100;
 const STAGING_PREFIX = "staging-";
@@ -36,6 +37,31 @@ function sleep(ms: number, signal: AbortSignal) {
     );
   });
 }
+
+// `node`, `python3.12`, `MainThread`... say nothing; the script they run does.
+const INTERPRETER = /^(node|nodejs|bun|deno|python[\d.]*|ruby|perl|php|java|sh|bash|zsh|MainThread)$/;
+
+function scriptName(args: string[]): string | null {
+  const script = args.slice(1).find((arg) => !arg.startsWith("-"));
+  if (script === undefined) return null;
+  // .../node_modules/@scope/pkg/dist/bin.js -> @scope/pkg
+  const modules = script.lastIndexOf("node_modules/");
+  if (modules !== -1) {
+    const parts = script.slice(modules + "node_modules/".length).split("/");
+    const pkg = parts[0]?.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+    if (pkg !== undefined && pkg !== ".bin") return pkg;
+  }
+  return path.basename(script).replace(/\.(m?js|cjs|ts|py|rb)$/, "") || null;
+}
+
+function displayName(name: string, args: string[]): string {
+  const binary = args[0] === undefined ? name : path.basename(args[0]);
+  if (!INTERPRETER.test(name) && !INTERPRETER.test(binary)) return name;
+  return scriptName(args) ?? name;
+}
+
+// Broker and database URLs in argv carry passwords.
+const redact = (command: string) => command.replace(/(\/\/[^/\s:@]*:)[^@\s]+@/g, "$1***@");
 
 const readOrNull = (file: string) => readFile(file, "utf8").catch(() => null);
 
@@ -101,7 +127,9 @@ async function linuxDetails(processes: Raw[]): Promise<void> {
         readOrNull(`/proc/${proc.pid}/cmdline`),
         readOrNull(`/proc/${proc.pid}/cgroup`),
       ]);
-      proc.command = cmdline?.split("\0").filter(Boolean).join(" ") || proc.name;
+      const args = cmdline?.split("\0").filter(Boolean) ?? [];
+      proc.command = redact(args.join(" ")) || proc.name;
+      proc.name = displayName(proc.name, args);
       // cgroup v2 (docker-<id>.scope) and v1 (/docker/<id>).
       proc.containerId = /docker[-/]([0-9a-f]{64})/.exec(cgroup ?? "")?.[1] ?? null;
     }),
@@ -119,7 +147,7 @@ async function darwinProcesses(signal: AbortSignal): Promise<Raw[]> {
   for (const line of stdout.split("\n")) {
     const match = /^\s*(\d+)\s+([\d.]+)\s+(\d+)\s+(.+)$/.exec(line);
     if (match === null) continue;
-    const command = match[4] ?? "";
+    const command = redact(match[4] ?? "");
     processes.push({
       pid: Number(match[1]),
       name: path.basename(command),
