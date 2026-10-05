@@ -10,6 +10,10 @@ The server keeps the chart samples, taken every 5 seconds for any machine someon
 
 Processes lists the busiest processes, sorted by CPU or RAM (toggle in the tab). A process running in a docker container shows its compose project and service next to its name (`gig-6565 · django`), so you can tell which slug is eating the machine. Hover a row for the PID and full command line. CPU is a percent of one core, like `top`, so a multithreaded process can pass 100%.
 
+Disk shows folder sizes, largest first, ncdu style: `/` on Linux, your home folder on macOS. Click a folder to go in, or use the breadcrumb or `..` to go back up. Files over 100 MB get their own row (that's how you spot a swapfile or a forgotten dump), and the rest of the folder's files are summed under "Other files". Other mounts (`/proc`, docker overlays) show as "other disk" and aren't measured.
+
+A `du /` takes minutes on a busy box, so the server scans in the background with one `du -xk -d 1` per subfolder, two at a time, and the sizes fill in as they arrive. Each of those du runs also measures that subfolder's children, so going one level down is usually instant. Results are cached for 15 minutes, and the refresh button rescans. Folders the BB user can't read (like `/var/lib/docker`) make sizes a floor, flagged with a warning icon.
+
 Slugs lists the staging slugs running on the machine's docker engine, with a destroy button per slug, plus the other Traefik-exposed services. Each slug row has a status dot, the running/total container count, the stack's age, and a chip per Traefik host (`api`, `app`, `mail`) that opens it in the browser.
 
 ## Which machine
@@ -53,6 +57,7 @@ It goes by project name from a neutral directory, so it works even when the work
 bb machine-stats machines [--json]
 bb machine-stats show [<host-id>] [--json]
 bb machine-stats top [--memory] [--host <host-id>] [--json]
+bb machine-stats disk [<path>] [--rescan] [--host <host-id>] [--json]
 bb machine-stats stacks [--cleanup] [--host <host-id>] [--json]
 bb machine-stats destroy <slug> --yes [--host <host-id>] [--json]
 ```
