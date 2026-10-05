@@ -49,6 +49,56 @@ export const processListingSchema = z.object({
   processes: z.array(processSchema),
 });
 
+// Absolute paths only; du and readdir get them as plain argv, never a shell.
+export const diskPathSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine((value) => value.startsWith("/") && !value.includes("\0"), "Use an absolute path");
+
+export const dirListingSchema = z.object({
+  path: z.string(),
+  // Subfolders on the same filesystem, the ones worth measuring.
+  dirs: z.array(z.string()),
+  // Subfolders that are other mounts (/proc, docker overlays...), not measured.
+  mounts: z.array(z.string()),
+  // Plain files directly in this folder, summed.
+  filesBytes: z.number(),
+  unreadable: z.boolean(),
+});
+
+export const duLevelSchema = z.object({
+  path: z.string(),
+  totalBytes: z.number(),
+  // Direct subfolders and their sizes, from the same du run.
+  children: z.array(z.object({ name: z.string(), bytes: z.number() })),
+  // du hit folders it couldn't read, so sizes are a floor.
+  partial: z.boolean(),
+});
+
+export const diskEntrySchema = z.object({
+  name: z.string(),
+  kind: z.enum(["dir", "files", "mount"]),
+  // Null while it's still being measured.
+  bytes: z.number().nullable(),
+});
+
+export const diskLevelSchema = z.object({
+  path: z.string(),
+  // Where the Disk tab opens: / on Linux, the home folder on macOS.
+  rootPath: z.string(),
+  entries: z.array(diskEntrySchema),
+  scanning: z.boolean(),
+  scannedAt: z.number().nullable(),
+  partial: z.boolean(),
+  error: z.string().nullable(),
+});
+
+export type DirListing = z.infer<typeof dirListingSchema>;
+export type DuLevel = z.infer<typeof duLevelSchema>;
+export type DiskLevel = z.infer<typeof diskLevelSchema>;
+export type DiskEntry = z.infer<typeof diskEntrySchema>;
+
 export const historyPointSchema = z.object({
   at: z.number(),
   cpuPercent: z.number(),
@@ -148,6 +198,18 @@ export const hostContract = defineRpcContract({
   destroy_stack: {
     input: z.object({ slug: slugSchema }).strict(),
     output: destroyResultSchema,
+  },
+  disk_root: {
+    input: z.object({}).strict(),
+    output: z.object({ path: z.string() }),
+  },
+  disk_list: {
+    input: z.object({ path: diskPathSchema }).strict(),
+    output: dirListingSchema,
+  },
+  disk_du: {
+    input: z.object({ path: diskPathSchema }).strict(),
+    output: duLevelSchema,
   },
   cleanup_status: {
     input: z
