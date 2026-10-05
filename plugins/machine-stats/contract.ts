@@ -62,7 +62,9 @@ export const dirListingSchema = z.object({
   dirs: z.array(z.string()),
   // Subfolders that are other mounts (/proc, docker overlays...), not measured.
   mounts: z.array(z.string()),
-  // Plain files directly in this folder, summed.
+  // The biggest plain files directly in this folder (swapfiles, dumps...).
+  files: z.array(z.object({ name: z.string(), bytes: z.number() })),
+  // Every other plain file in this folder, summed.
   filesBytes: z.number(),
   unreadable: z.boolean(),
 });
@@ -78,9 +80,11 @@ export const duLevelSchema = z.object({
 
 export const diskEntrySchema = z.object({
   name: z.string(),
-  kind: z.enum(["dir", "files", "mount"]),
-  // Null while it's still being measured.
+  // "files" is the rest of the plain files in the folder, summed.
+  kind: z.enum(["dir", "file", "files", "mount"]),
+  // Null while it's still being measured, or when it couldn't be.
   bytes: z.number().nullable(),
+  unreadable: z.boolean(),
 });
 
 export const diskLevelSchema = z.object({

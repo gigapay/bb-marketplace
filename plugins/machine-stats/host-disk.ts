@@ -11,6 +11,9 @@ const run = promisify(execFile);
 // /home on a busy dev box takes minutes.
 const DU_TIMEOUT_MS = 15 * 60_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
+// Files bigger than this get their own row instead of joining "other files".
+const BIG_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_BIG_FILES = 10;
 
 export function diskRoot(): string {
   // macOS's / is the sealed system volume; what fills up is in the home folder.
@@ -18,7 +21,14 @@ export function diskRoot(): string {
 }
 
 export async function listDir(dir: string): Promise<DirListing> {
-  const listing: DirListing = { path: dir, dirs: [], mounts: [], filesBytes: 0, unreadable: false };
+  const listing: DirListing = {
+    path: dir,
+    dirs: [],
+    mounts: [],
+    files: [],
+    filesBytes: 0,
+    unreadable: false,
+  };
   let names: string[];
   try {
     names = await readdir(dir);
@@ -35,10 +45,14 @@ export async function listDir(dir: string): Promise<DirListing> {
         (stats.dev === device ? listing.dirs : listing.mounts).push(name);
       } else if (!stats.isSymbolicLink()) {
         // Allocated size, like du, not the apparent one.
-        listing.filesBytes += stats.blocks * 512;
+        const bytes = stats.blocks * 512;
+        if (bytes >= BIG_FILE_BYTES) listing.files.push({ name, bytes });
+        else listing.filesBytes += bytes;
       }
     }),
   );
+  listing.files.sort((a, b) => b.bytes - a.bytes);
+  for (const file of listing.files.splice(MAX_BIG_FILES)) listing.filesBytes += file.bytes;
   listing.dirs.sort();
   listing.mounts.sort();
   return listing;

@@ -16,7 +16,8 @@
         "cpu": "./assets/cpu.svg",
         "memory": "./assets/memory.svg",
         "disk": "./assets/disk.svg",
-        "folder": "./assets/folder.svg"
+        "folder": "./assets/folder.svg",
+        "file": "./assets/file.svg"
       }
     },
     "server": "./server.ts",

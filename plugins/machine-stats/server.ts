@@ -74,11 +74,14 @@ export const rpcContract = defineRpcContract({
   },
 });
 
+// Host calls fail after 30s unless they pass timeoutMs, whatever their signal.
 const SNAPSHOT_TIMEOUT_MS = 15_000;
 // The Usage charts' window. A machine is sampled in the background for this
 // long after someone last looked at it, so closing the card leaves no hole.
 const HISTORY_WINDOW_MS = 15 * 60_000;
 const HISTORY_INTERVAL_MS = 5_000;
+// /home on a busy dev box takes minutes; the SDK caps host calls at 30.
+const DISK_DU_TIMEOUT_MS = 16 * 60_000;
 const LIST_TIMEOUT_MS = 20_000;
 // Two sequential `compose down`s, each capped at three minutes on the host.
 const DESTROY_TIMEOUT_MS = 400_000;
@@ -188,7 +191,7 @@ export default async function plugin(bb: BbPluginApi) {
     const s = await host.call(
       "snapshot",
       {},
-      { hostId, signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) },
+      { hostId, signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS), timeoutMs: SNAPSHOT_TIMEOUT_MS },
     );
     record(hostId, s);
     return s;
@@ -232,9 +235,11 @@ export default async function plugin(bb: BbPluginApi) {
 
   const diskLevelOf = createDiskScanner({
     root: async (hostId) =>
-      (await host.call("disk_root", {}, { hostId, signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) })).path,
-    list: (hostId, path, signal) => host.call("disk_list", { path }, { hostId, signal }),
-    du: (hostId, path, signal) => host.call("disk_du", { path }, { hostId, signal }),
+      (await host.call("disk_root", {}, { hostId, signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS), timeoutMs: SNAPSHOT_TIMEOUT_MS })).path,
+    list: (hostId, path, signal) =>
+      host.call("disk_list", { path }, { hostId, signal, timeoutMs: SNAPSHOT_TIMEOUT_MS * 4 }),
+    du: (hostId, path, signal) =>
+      host.call("disk_du", { path }, { hostId, signal, timeoutMs: DISK_DU_TIMEOUT_MS }),
   });
 
   async function diskLevel(hostId: string | null, path: string | null, rescan = false): Promise<DiskLevel> {
@@ -245,7 +250,7 @@ export default async function plugin(bb: BbPluginApi) {
     return host.call(
       "processes",
       { limit },
-      { hostId: await resolveHostId(hostId), signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) },
+      { hostId: await resolveHostId(hostId), signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS), timeoutMs: SNAPSHOT_TIMEOUT_MS },
     );
   }
 
@@ -253,7 +258,7 @@ export default async function plugin(bb: BbPluginApi) {
     return host.call(
       "list_stacks",
       {},
-      { hostId: await resolveHostId(hostId), signal: AbortSignal.timeout(LIST_TIMEOUT_MS) },
+      { hostId: await resolveHostId(hostId), signal: AbortSignal.timeout(LIST_TIMEOUT_MS), timeoutMs: LIST_TIMEOUT_MS },
     );
   }
 
@@ -263,7 +268,7 @@ export default async function plugin(bb: BbPluginApi) {
     return host.call(
       "destroy_stack",
       { slug },
-      { hostId: target, signal: AbortSignal.timeout(DESTROY_TIMEOUT_MS) },
+      { hostId: target, signal: AbortSignal.timeout(DESTROY_TIMEOUT_MS), timeoutMs: DESTROY_TIMEOUT_MS },
     );
   }
 
@@ -284,7 +289,7 @@ export default async function plugin(bb: BbPluginApi) {
       const fetched = await host.call(
         "cleanup_status",
         { slugs: stale, repos: parseRepos(String(githubRepos ?? "")) },
-        { hostId: target, signal: AbortSignal.timeout(CLEANUP_TIMEOUT_MS) },
+        { hostId: target, signal: AbortSignal.timeout(CLEANUP_TIMEOUT_MS), timeoutMs: CLEANUP_TIMEOUT_MS },
       );
       for (const status of fetched) cleanupCache.set(key(status.slug), { status, at: now });
     }
@@ -440,9 +445,13 @@ export default async function plugin(bb: BbPluginApi) {
             `${level.path}${level.partial ? "  (some folders unreadable, sizes are a floor)" : ""}`,
             "",
             ...level.entries.map((entry) => {
-              const size = entry.bytes === null ? "-" : formatBytes(entry.bytes);
-              const name =
-                entry.kind === "files" ? "(files)" : entry.kind === "mount" ? `${entry.name}/  (other mount)` : `${entry.name}/`;
+              const size = entry.unreadable ? "unreadable" : entry.bytes === null ? "-" : formatBytes(entry.bytes);
+              const name = {
+                dir: `${entry.name}/`,
+                file: entry.name,
+                files: "(other files)",
+                mount: `${entry.name}/  (other mount)`,
+              }[entry.kind];
               return `${size.padStart(9)}  ${name}`;
             }),
           ];

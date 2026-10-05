@@ -110,14 +110,20 @@ function EntryRow({
   onOpen: (() => void) | null;
 }) {
   const share = entry.bytes !== null && largest > 0 ? (entry.bytes / largest) * 100 : 0;
-  const label = entry.kind === "files" ? "Files here" : entry.name;
+  const label = entry.kind === "files" ? "Other files" : entry.name;
   const size =
-    entry.kind === "mount" ? "other disk" : entry.bytes === null ? null : formatBytes(entry.bytes);
+    entry.kind === "mount"
+      ? "other disk"
+      : entry.unreadable
+        ? "unreadable"
+        : entry.bytes === null
+          ? null
+          : formatBytes(entry.bytes);
   const body = (
     <>
       <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4">
         <Icon
-          name={entry.kind === "files" ? "machine-stats/disk" : "machine-stats/folder"}
+          name={entry.kind === "dir" || entry.kind === "mount" ? "machine-stats/folder" : "machine-stats/file"}
           aria-hidden
           className="size-3.5 shrink-0 text-subtle-foreground"
         />
@@ -185,7 +191,7 @@ export function DiskUsage({ hostId }: { hostId: string | null }) {
 
   const measured = level.entries.filter((e) => e.bytes !== null);
   const largest = Math.max(0, ...measured.map((e) => e.bytes ?? 0));
-  const pending = level.entries.filter((e) => e.kind === "dir" && e.bytes === null).length;
+  const pending = level.entries.filter((e) => e.kind === "dir" && e.bytes === null && !e.unreadable).length;
   const total = measured.reduce((sum, e) => sum + (e.bytes ?? 0), 0);
   const parent = level.path === "/" ? null : level.path.replace(/\/[^/]+$/, "") || "/";
 
