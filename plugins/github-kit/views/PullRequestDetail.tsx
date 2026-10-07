@@ -269,6 +269,7 @@ function PrSidebar({
           {pr.reviewDecision ? <ReviewChip decision={pr.reviewDecision} /> : null}
         </div>
       </SideBlock>
+      <LinearResolves pr={pr} rpc={rpc} />
       {threadId === null ? <LinkedThreads branch={pr.headRefName} /> : null}
       <SidebarReviewers pr={pr} rpc={rpc} onChanged={onChanged} />
       <SidebarChecks state={checks} pr={pr} rpc={rpc} agentThreadId={agentThreadId} />
@@ -279,6 +280,75 @@ function PrSidebar({
       ) : null}
       <SidebarFiles pr={pr} onOpenFile={onOpenFile} />
     </div>
+  );
+}
+
+type LinearIssues = {
+  installed: boolean;
+  pluginId: string | null;
+  issues: { identifier: string; title: string; url: string; state: { name: string; type: string; color: string } }[];
+};
+
+/** Linear's state glyph: an empty, half or full ring in the state's color. */
+function LinearStateDot({ state }: { state: { type: string; color: string; name: string } }) {
+  const done = state.type === "completed" || state.type === "canceled";
+  return (
+    <span
+      role="img"
+      aria-label={state.name}
+      title={state.name}
+      className="inline-block size-3.5 shrink-0 rounded-full border-[1.5px]"
+      style={{
+        borderColor: state.color,
+        borderStyle: state.type === "backlog" ? "dashed" : "solid",
+        background: done ? state.color : state.type === "started" ? `conic-gradient(${state.color} 0 50%, transparent 50% 100%)` : "transparent",
+      }}
+    />
+  );
+}
+
+/**
+ * "Resolves": the Linear tickets the PR mentions (title, branch, body), when
+ * the Linear plugin is installed. A row opens the ticket in that plugin's page.
+ */
+function LinearResolves({ pr, rpc }: { pr: PrDetail; rpc: Rpc }) {
+  const [data, setData] = useState<LinearIssues | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    // Secondary info: on failure the block just stays hidden.
+    rpc.call("pr_linear_issues", { key: pr.key }).then(
+      (result) => !cancelled && setData(result),
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [rpc, pr.key, pr.title, pr.headRefName]);
+  if (data === null || !data.installed || data.pluginId === null || data.issues.length === 0) return null;
+  return (
+    <SideBlock title="Resolves">
+      {data.issues.map((issue) => (
+        <div key={issue.identifier} className="flex min-w-0 items-center gap-2">
+          <LinearStateDot state={issue.state} />
+          {/* An app route: BB navigates to the Linear plugin's page in place. */}
+          <UrlLink
+            href={`/plugins/${encodeURIComponent(data.pluginId!)}/issues/${encodeURIComponent(issue.identifier)}`}
+            className="min-w-0 flex-1 truncate text-foreground no-underline hover:underline"
+          >
+            {issue.title}
+          </UrlLink>
+          <UrlLink
+            data-github-kit-external=""
+            href={issue.url}
+            target="_blank"
+            aria-label={`Open ${issue.identifier} in Linear`}
+            className="shrink-0 font-mono text-xs text-muted-foreground no-underline hover:text-foreground"
+          >
+            {issue.identifier}
+          </UrlLink>
+        </div>
+      ))}
+    </SideBlock>
   );
 }
 
