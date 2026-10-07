@@ -44,8 +44,11 @@ export function LinearMarkdown({ content }: { content: string }) {
     setAttachment({ url, name: text || "Attachment" });
   };
 
+  // BB's Markdown widens tables out to the nearest ancestor that clips
+  // horizontally (made for chat). Clip here so they stay inside the card and
+  // scroll sideways when too wide.
   return (
-    <div onClickCapture={onClickCapture}>
+    <div onClickCapture={onClickCapture} className="min-w-0 overflow-x-auto">
       <Markdown content={proxyLinearUploads(content)} />
       <AttachmentViewer attachment={attachment} onClose={() => setAttachment(null)} />
     </div>
