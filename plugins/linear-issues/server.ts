@@ -723,16 +723,37 @@ export default async function plugin(bb: BbPluginApi) {
     return flattenDetail(data.issue);
   }
 
+  // Linear doesn't apply `number` inside an IssueFilter: the old team +
+  // number filter returned the team's 100 most recently updated issues
+  // instead of the ones asked for. issue(id:) takes an identifier, so look
+  // each one up, batched as aliases in one request per 25.
   async function issuesByIdentifiers(identifiers: string[]): Promise<IssueSummary[]> {
-    if (identifiers.length === 0) return [];
-    const filter = {
-      or: identifiers.map((identifier) => {
-        const [key, number] = identifier.split("-");
-        return { team: { key: { eq: key } }, number: { eq: Number(number) } };
-      }),
-    };
-    const data = await linear<{ issues: Connection<RawSummary> }>(issuesQuery("all"), { filter });
-    return data.issues.nodes.map(flattenSummary);
+    const found: IssueSummary[] = [];
+    for (let start = 0; start < identifiers.length; start += 25) {
+      found.push(...(await lookupIdentifiers(identifiers.slice(start, start + 25))));
+    }
+    return found;
+  }
+
+  // issue(id:) is non-null, so one identifier that doesn't exist nulls the
+  // whole response. Split the batch until the missing ones are isolated and
+  // drop them: a deleted issue costs a few extra requests, not the list.
+  async function lookupIdentifiers(batch: string[]): Promise<IssueSummary[]> {
+    if (batch.length === 0) return [];
+    const query = `query IssuesByIdentifier(${batch.map((_, index) => `$i${index}: String!`).join(", ")}) {
+      ${batch.map((_, index) => `i${index}: issue(id: $i${index}) { ${ISSUE_SUMMARY_FIELDS} }`).join("\n")}
+    }`;
+    const variables = Object.fromEntries(batch.map((identifier, index) => [`i${index}`, identifier]));
+    try {
+      const data = await linear<Record<string, RawSummary>>(query, variables);
+      return Object.values(data).map(flattenSummary);
+    } catch (cause) {
+      if (!(cause instanceof Error && cause.message.includes("Entity not found"))) throw cause;
+      if (batch.length === 1) return [];
+      const middle = Math.ceil(batch.length / 2);
+      const [left, right] = await Promise.all([lookupIdentifiers(batch.slice(0, middle)), lookupIdentifiers(batch.slice(middle))]);
+      return [...left, ...right];
+    }
   }
 
   // Team keys only change when someone adds a team, so a short cache is fine.
