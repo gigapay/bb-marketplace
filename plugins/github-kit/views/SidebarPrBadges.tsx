@@ -13,6 +13,7 @@ import {
   useBbNavigate,
 } from "@get-bb/plugin-sdk/app";
 import type { PluginSidebarPullRequest } from "@get-bb/plugin-sdk/app";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { cn } from "@/lib/utils";
 import { parsePrUrl } from "../shared/pr-ref";
 import { PrGlyphIcon, type PrGlyph } from "./icons";
@@ -166,6 +167,28 @@ function presentation(pr: PluginSidebarPullRequest): { glyph: PrGlyph; className
   }
 }
 
+const STATE_LABEL: Record<PluginSidebarPullRequest["state"], string> = {
+  open: "Open",
+  draft: "Draft",
+  merged: "Merged",
+  closed: "Closed",
+};
+
+// What needs doing next; states that repeat the PR state stay blank.
+const ATTENTION_LABEL: Record<PluginSidebarPullRequest["attention"], string | null> = {
+  blocked: "Blocked",
+  changes_requested: "Changes requested",
+  checks_failed: "Checks failing",
+  checks_pending: "Checks running",
+  closed: null,
+  conflicts: "Has conflicts",
+  draft: null,
+  merged: null,
+  none: null,
+  ready_to_merge: "Ready to merge",
+  review_requested: "Review requested",
+};
+
 function PrBadge({ threadId, dim }: { threadId: string; dim: Element[] }) {
   const { pullRequest } = useThreadPullRequest(threadId);
   const navigate = useBbNavigate();
@@ -181,22 +204,44 @@ function PrBadge({ threadId, dim }: { threadId: string; dim: Element[] }) {
       {...{ [MARKER]: "" }}
       className="pointer-events-auto relative z-[31] ml-1.5 inline-flex shrink-0 items-center"
     >
-      <button
-        type="button"
-        title={`PR #${pullRequest.number} · ${style.label}\n${pullRequest.title}`}
-        aria-label={`Pull request #${pullRequest.number}: ${style.label}`}
-        className={cn("inline-flex size-4 items-center justify-center rounded-sm hover:bg-accent", style.className)}
-        onClick={(event) => {
-          // The row's own link sits underneath; this click is ours.
-          event.preventDefault();
-          event.stopPropagation();
-          if (ref) navigate.toPluginPanel("pulls", { subPath: `${ref.owner}/${ref.name}/${ref.number}` });
-        }}
-      >
-        <span className="inline-flex scale-[0.85]">
-          <PrGlyphIcon kind={style.glyph} label={style.label} />
-        </span>
-      </button>
+      <HoverCard openDelay={250} closeDelay={100}>
+        <HoverCardTrigger asChild>
+          <button
+            type="button"
+            aria-label={`Pull request #${pullRequest.number}: ${style.label}`}
+            className={cn("inline-flex size-4 items-center justify-center rounded-sm hover:bg-accent", style.className)}
+            onClick={(event) => {
+              // The row's own link sits underneath; this click is ours.
+              event.preventDefault();
+              event.stopPropagation();
+              if (ref) navigate.toPluginPanel("pulls", { subPath: `${ref.owner}/${ref.name}/${ref.number}` });
+            }}
+          >
+            <span className="inline-flex scale-[0.85]">
+              <PrGlyphIcon kind={style.glyph} label={style.label} />
+            </span>
+          </button>
+        </HoverCardTrigger>
+        <HoverCardContent side="right" align="start" className="w-72 p-3">
+          <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
+            <span className={cn("inline-flex scale-75", style.className)}>
+              <PrGlyphIcon kind={style.glyph} label={style.label} />
+            </span>
+            {ref ? `${ref.owner}/${ref.name}#${ref.number}` : `#${pullRequest.number}`}
+          </p>
+          <p className="mt-1 text-sm font-medium leading-snug">{pullRequest.title}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span className={cn("inline-flex items-center gap-1.5", style.className)}>
+              <span className="inline-flex scale-75">
+                <PrGlyphIcon kind={style.glyph} label={style.label} />
+              </span>
+              {STATE_LABEL[pullRequest.state]}
+            </span>
+            {ATTENTION_LABEL[pullRequest.attention] ? <span>{ATTENTION_LABEL[pullRequest.attention]}</span> : null}
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">Click to open the pull request</p>
+        </HoverCardContent>
+      </HoverCard>
     </span>
   );
 }
