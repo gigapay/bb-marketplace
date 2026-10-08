@@ -19,7 +19,9 @@ import { PrGlyphIcon, type PrGlyph } from "./icons";
 
 const MARKER = "data-github-kit-pr-badge";
 
-type Target = { element: Element; threadId: string };
+// element hosts the badge; dim is what greys out once the PR is merged (the
+// worktree header and its thread titles, or the single thread's title).
+type Target = { element: Element; threadId: string; dim: Element[] };
 
 function environmentHeaderLabels(name: string): Element[] {
   const quoted = CSS.escape(name);
@@ -33,7 +35,46 @@ function threadTitleContainer(threadId: string): Element | null {
 }
 
 function sameTargets(a: Target[], b: Target[]): boolean {
-  return a.length === b.length && a.every((t, i) => t.element === b[i]!.element && t.threadId === b[i]!.threadId);
+  return (
+    a.length === b.length &&
+    a.every(
+      (t, i) =>
+        t.element === b[i]!.element &&
+        t.threadId === b[i]!.threadId &&
+        t.dim.length === b[i]!.dim.length &&
+        t.dim.every((element, j) => element === b[i]!.dim[j]),
+    )
+  );
+}
+
+const DIMMED = "data-github-kit-merged";
+
+/**
+ * Greys out a row's title once its PR is merged, so it reads as done and safe
+ * to archive. Plugin badges inside the row (ours, Linear's) keep full colour.
+ * Elements are BB's; the attribute marks what we touched so cleanup only
+ * undoes our own change.
+ */
+function dimElements(elements: Element[]): () => void {
+  const touched: HTMLElement[] = [];
+  for (const container of elements) {
+    const hasText = [...container.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim());
+    const targets = hasText
+      ? [container]
+      : [...container.children].filter((child) => !child.hasAttribute("data-bb-plugin") && !child.querySelector("[data-bb-plugin]"));
+    for (const target of targets) {
+      if (!(target instanceof HTMLElement) || target.hasAttribute(DIMMED)) continue;
+      target.setAttribute(DIMMED, "");
+      target.style.opacity = "0.45";
+      touched.push(target);
+    }
+  }
+  return () => {
+    for (const target of touched) {
+      target.removeAttribute(DIMMED);
+      target.style.removeProperty("opacity");
+    }
+  };
 }
 
 export function SidebarPrBadges() {
@@ -43,14 +84,16 @@ export function SidebarPrBadges() {
   // One lookup per worktree (threads in it share the branch); a thread that
   // isn't in a worktree group gets its own badge.
   const groups = useMemo(() => {
-    const byEnvironment = new Map<string, { label: string; threadId: string }>();
+    const byEnvironment = new Map<string, { label: string; threadIds: string[] }>();
     const loose: string[] = [];
     for (const thread of threads) {
       const environment = thread.environment;
       if (thread.isHidden || !environment?.branchName) continue;
       const label = environment.name ?? environment.branchName;
       if (environment.isWorktree && environment.id && label) {
-        if (!byEnvironment.has(environment.id)) byEnvironment.set(environment.id, { label, threadId: thread.id });
+        const entry = byEnvironment.get(environment.id) ?? { label, threadIds: [] };
+        entry.threadIds.push(thread.id);
+        byEnvironment.set(environment.id, entry);
       } else {
         loose.push(thread.id);
       }
@@ -61,12 +104,23 @@ export function SidebarPrBadges() {
   useEffect(() => {
     const compute = (): Target[] => {
       const found: Target[] = [];
-      for (const { label, threadId } of groups.byEnvironment.values()) {
-        for (const element of environmentHeaderLabels(label)) found.push({ element, threadId });
+      const rowsOf = (ids: string[]) => ids.flatMap((id) => threadTitleContainer(id) ?? []);
+      for (const { label, threadIds } of groups.byEnvironment.values()) {
+        const headers = environmentHeaderLabels(label);
+        if (headers.length > 0) {
+          // A worktree with several threads is a collapsible group: one badge on its header.
+          for (const element of headers) found.push({ element, threadId: threadIds[0]!, dim: [element, ...rowsOf(threadIds)] });
+        } else {
+          // A worktree with a single thread shows as a plain row, with no header.
+          for (const threadId of threadIds) {
+            const element = threadTitleContainer(threadId);
+            if (element) found.push({ element, threadId, dim: [element] });
+          }
+        }
       }
       for (const threadId of groups.loose) {
         const element = threadTitleContainer(threadId);
-        if (element) found.push({ element, threadId });
+        if (element) found.push({ element, threadId, dim: [element] });
       }
       return found;
     };
@@ -87,7 +141,13 @@ export function SidebarPrBadges() {
     };
   }, [groups]);
 
-  return <>{targets.map((target, index) => createPortal(<PrBadge threadId={target.threadId} />, target.element, `${target.threadId}:${index}`))}</>;
+  return (
+    <>
+      {targets.map((target, index) =>
+        createPortal(<PrBadge threadId={target.threadId} dim={target.dim} />, target.element, `${target.threadId}:${index}`),
+      )}
+    </>
+  );
 }
 
 function presentation(pr: PluginSidebarPullRequest): { glyph: PrGlyph; className: string; label: string } {
@@ -106,9 +166,11 @@ function presentation(pr: PluginSidebarPullRequest): { glyph: PrGlyph; className
   }
 }
 
-function PrBadge({ threadId }: { threadId: string }) {
+function PrBadge({ threadId, dim }: { threadId: string; dim: Element[] }) {
   const { pullRequest } = useThreadPullRequest(threadId);
   const navigate = useBbNavigate();
+  const merged = pullRequest?.state === "merged";
+  useEffect(() => (merged ? dimElements(dim) : undefined), [merged, dim]);
   if (pullRequest === null) return null;
   const style = presentation(pullRequest);
   const ref = parsePrUrl(pullRequest.url);
