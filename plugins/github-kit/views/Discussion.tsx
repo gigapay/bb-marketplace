@@ -20,6 +20,7 @@ export function Discussion({
   showPath,
   queue,
   actions,
+  onOpenInDiff,
 }: {
   item: FeedItem;
   prKey: string;
@@ -29,6 +30,8 @@ export function Discussion({
   queue?: { queued: boolean; onToggle: () => void };
   /** Extra footer buttons, like "Send to thread" in the diff. */
   actions?: ReactNode;
+  /** Set in the overview: the file:line chip opens the thread in the Diff tab. */
+  onOpenInDiff?: () => void;
 }) {
   const rpc = useRpc<typeof rpcContract>();
   const [expanded, setExpanded] = useState(!item.isResolved);
@@ -53,6 +56,7 @@ export function Discussion({
 
   return (
     <article
+      id={threadAnchorId(item.id)}
       className={cn(
         "rounded-xl border bg-card text-card-foreground",
         queue?.queued ? "border-primary" : "border-border/70",
@@ -66,10 +70,22 @@ export function Discussion({
         <Author actor={item.author} />
         <span className="text-muted-foreground">{relativeTime(item.createdAt)}</span>
         {showPath && item.kind === "thread" ? (
-          <span className="min-w-0 truncate font-mono text-muted-foreground">
-            {item.path}
-            {item.line !== null ? `:${item.line}` : ""}
-          </span>
+          onOpenInDiff ? (
+            <button
+              type="button"
+              onClick={onOpenInDiff}
+              title="Open in the Diff tab"
+              className="min-w-0 truncate text-left font-mono text-muted-foreground hover:text-foreground hover:underline"
+            >
+              {item.path}
+              {item.line !== null ? `:${item.line}` : ""}
+            </button>
+          ) : (
+            <span className="min-w-0 truncate font-mono text-muted-foreground">
+              {item.path}
+              {item.line !== null ? `:${item.line}` : ""}
+            </span>
+          )
         ) : null}
         {item.kind === "review" && item.reviewState ? <ReviewStateChip state={item.reviewState} /> : null}
         {item.isOutdated ? <span className="shrink-0 text-[#bf8700]">Outdated</span> : null}
@@ -101,6 +117,7 @@ export function Discussion({
 
       {expanded ? (
         <>
+          {showPath && item.kind === "thread" && item.diffHunk ? <HunkPreview hunk={item.diffHunk} onOpen={onOpenInDiff} /> : null}
           <div className="px-4 pb-3 pt-1">
             <Markdown content={item.body} className="text-[15px] leading-relaxed" />
           </div>
@@ -157,6 +174,51 @@ export function Discussion({
         </>
       ) : null}
     </article>
+  );
+}
+
+/** DOM id of a review thread, so the Diff tab can scroll to it. */
+export function threadAnchorId(itemId: string): string {
+  return `github-kit-thread-${itemId}`;
+}
+
+const PREVIEW_LINES = 6;
+
+/**
+ * The last lines of the diff hunk a review comment sits on, like GitHub's
+ * conversation view: GitHub's hunk ends on the commented line.
+ */
+function HunkPreview({ hunk, onOpen }: { hunk: string; onOpen?: () => void }) {
+  const lines = hunk.split("\n").filter((line) => !line.startsWith("@@")).slice(-PREVIEW_LINES);
+  if (lines.length === 0) return null;
+  const body = (
+    <pre className="overflow-x-auto py-1.5 font-mono text-xs leading-5">
+      {lines.map((line, index) => (
+        <div
+          key={index}
+          className={cn(
+            "whitespace-pre px-3",
+            line.startsWith("+") && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
+            line.startsWith("-") && "bg-destructive/10 text-destructive",
+            !line.startsWith("+") && !line.startsWith("-") && "text-muted-foreground",
+            index === lines.length - 1 && "font-semibold",
+          )}
+        >
+          {line === "" ? " " : line}
+        </div>
+      ))}
+    </pre>
+  );
+  return (
+    <div className="mx-4 mb-2 mt-1 overflow-hidden rounded-md border border-border/70 bg-muted/30">
+      {onOpen ? (
+        <button type="button" onClick={onOpen} title="Open in the Diff tab" className="block w-full text-left hover:bg-muted/50">
+          {body}
+        </button>
+      ) : (
+        body
+      )}
+    </div>
   );
 }
 
