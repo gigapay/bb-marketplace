@@ -58,8 +58,11 @@ function scrollParent(element: Element): Element | null {
  * it down; a single scrollIntoView (smooth even more so) lands short. This
  * re-aims every frame for a moment, and stops as soon as the user scrolls.
  */
-function settleOnFile(path: string) {
+function settleOnFile(path: string, anchorId: string | null = null) {
   const started = performance.now();
+  // A thread inside the file renders only once the file's diff mounts, so
+  // aim at the file until the thread exists, then at the thread.
+  const duration = anchorId === null ? 1500 : 3000;
   let cancelled = false;
   const cancel = () => {
     cancelled = true;
@@ -68,12 +71,20 @@ function settleOnFile(path: string) {
   window.addEventListener("touchstart", cancel, { once: true, passive: true });
   window.addEventListener("keydown", cancel, { once: true });
   const step = () => {
-    const element = document.getElementById(fileId(path));
-    if (cancelled || element === null) return;
+    if (cancelled) return;
+    const anchor = anchorId === null ? null : document.getElementById(anchorId);
+    const element = anchor ?? document.getElementById(fileId(path));
+    if (element === null) return;
     const scroller = scrollParent(element);
     const top = scroller?.getBoundingClientRect().top ?? 0;
-    if (Math.abs(element.getBoundingClientRect().top - top) > 12) element.scrollIntoView({ block: "start" });
-    if (performance.now() - started < 1500) requestAnimationFrame(step);
+    if (anchor !== null) {
+      // The thread goes mid-screen so the code it's about stays visible above it.
+      const middle = top + (scroller?.clientHeight ?? window.innerHeight) / 2;
+      if (Math.abs(anchor.getBoundingClientRect().top - middle) > 24) anchor.scrollIntoView({ block: "center" });
+    } else if (Math.abs(element.getBoundingClientRect().top - top) > 12) {
+      element.scrollIntoView({ block: "start" });
+    }
+    if (performance.now() - started < duration) requestAnimationFrame(step);
     else {
       window.removeEventListener("wheel", cancel);
       window.removeEventListener("touchstart", cancel);
@@ -107,7 +118,11 @@ export function PrDiffView({
 }) {
   const rpc = useRpc<typeof rpcContract>();
   // Range and position come back when you return to the page.
-  const [range, setRangeState] = useState<DiffRange>(() => parseRange(readUi(`range.${pr.key}`, "all", isString)));
+  // Coming from a review thread in the overview: threads only show on the
+  // full diff, so that one wins over the remembered range.
+  const [range, setRangeState] = useState<DiffRange>(() =>
+    readUi(`anchor.${pr.key}`, "", isString) !== "" ? { kind: "all" } : parseRange(readUi(`range.${pr.key}`, "all", isString)),
+  );
   const setRange = (next: DiffRange) => {
     setRangeState(next);
     writeUi(`range.${pr.key}`, rangeValue(next));
@@ -252,7 +267,17 @@ export function PrDiffView({
     if (restored.current || orderedPaths.length === 0) return;
     restored.current = true;
     const path = readUi(`file.${pr.key}`, "", isString);
-    if (path === "" || !orderedPaths.includes(path) || path === orderedPaths[0]) return;
+    const anchor = readUi(`anchor.${pr.key}`, "", isString);
+    writeUi(`anchor.${pr.key}`, null);
+    if (path === "" || !orderedPaths.includes(path)) return;
+    if (anchor !== "") {
+      // Open the file even if it was ticked as reviewed, so the thread shows.
+      setExpandedOverride((current) => new Map(current).set(path, true));
+      setActivePath(path);
+      settleOnFile(path, anchor);
+      return;
+    }
+    if (path === orderedPaths[0]) return;
     settleOnFile(path);
   }, [orderedPaths, pr.key]);
 
