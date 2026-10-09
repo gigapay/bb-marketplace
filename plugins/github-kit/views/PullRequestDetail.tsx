@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import type { FeedItem, PrDetail, Reviewer } from "../detail";
 import type { rpcContract } from "../server";
 import type { Audience } from "../shared/audience";
-import { Composer, Discussion } from "./Discussion";
+import { Composer, Discussion, threadAnchorId } from "./Discussion";
 import { usePrDetail } from "./useThreadPr";
 import { usePrChecks } from "./Checks";
 import { MenuItem, Popover } from "./Popover";
@@ -57,6 +57,14 @@ export function PullRequestDetail({
   // restores the remembered file when it mounts.
   const openFile = (path: string) => {
     writeUi(`file.${prKey}`, path);
+    setTab("diff");
+  };
+  // A review thread in the Activity opens the Diff on its file, scrolled to
+  // the thread itself (the diff consumes the anchor once).
+  const openThread = (item: FeedItem) => {
+    if (item.path === null) return;
+    writeUi(`file.${prKey}`, item.path);
+    writeUi(`anchor.${prKey}`, threadAnchorId(item.id));
     setTab("diff");
   };
   // A new push changes the head commit: reload so comments and diff stats follow.
@@ -132,7 +140,7 @@ export function PullRequestDetail({
                 <TitleBlock pr={pr} compact={false} />
                 {narrow ? <PrSidebar pr={pr} rpc={rpc} checks={checks} threadId={threadId} onChanged={refresh} onOpenFile={openFile} /> : null}
                 <DescriptionBlock pr={pr} />
-                <Comments pr={pr} rpc={rpc} threadId={threadId} onChanged={refresh} />
+                <Comments pr={pr} rpc={rpc} threadId={threadId} onChanged={refresh} onOpenThread={openThread} />
               </div>
               {narrow ? null : (
                 <aside className="lg:sticky lg:top-0 lg:self-start">
@@ -778,11 +786,13 @@ function Comments({
   rpc,
   threadId,
   onChanged,
+  onOpenThread,
 }: {
   pr: PrDetail;
   rpc: Rpc;
   threadId: string | null;
   onChanged: () => Promise<void>;
+  onOpenThread: (item: FeedItem) => void;
 }) {
   const [audience, setAudience] = useState<Audience>("all");
   const [showResolved, setShowResolved] = useState(false);
@@ -885,6 +895,7 @@ function Comments({
             prKey={pr.key}
             onChanged={onChanged}
             showPath
+            onOpenInDiff={() => onOpenThread(item)}
             queue={{ queued: queued.has(item.id), onToggle: () => toggle(item.id) }}
           />
         ))}
@@ -902,7 +913,7 @@ function Comments({
             {showResolved ? (
               <div className="mt-2 space-y-3">
                 {resolved.map((item) => (
-                  <Discussion key={item.id} item={item} prKey={pr.key} onChanged={onChanged} showPath />
+                  <Discussion key={item.id} item={item} prKey={pr.key} onChanged={onChanged} showPath onOpenInDiff={() => onOpenThread(item)} />
                 ))}
               </div>
             ) : null}
