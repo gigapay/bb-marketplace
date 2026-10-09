@@ -9,6 +9,7 @@ import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { PR_SCOPES, buildPrSearch, type PrScope } from "./shared/search";
 import { PR_DETAIL_QUERY, actorSchema, normalizeDetail, prDetailSchema, type PrDetail, type RawPrDetail } from "./detail";
+import { linearIdentifiers } from "./shared/linear-refs";
 import { LINKS_CHANGED, parsePrKey, parsePrReference, prKey, type PrRef } from "./shared/pr-ref";
 import { PR_DIFF_META_QUERY, SHA_PATTERN, diffRangeSchema, prDiffSchema, toDiffFiles, type DiffFile, type PrDiff, type RawDiffMeta, type RestFile } from "./diff";
 import { PR_CHECKS_QUERY, normalizeChecks, prChecksSchema, type PrChecks, type RawPrChecks } from "./checks";
@@ -67,6 +68,15 @@ const lineAnchorSchema = z
   .strict()
   .refine((anchor) => anchor.startLine === null || anchor.startLine < anchor.line, "startLine must come before line");
 const reviewBodySchema = z.string().trim().min(1).max(20_000);
+// What we need from the Linear plugin's issue_get; extra fields pass through.
+const linearIssueSchema = z
+  .object({
+    identifier: z.string(),
+    title: z.string(),
+    url: z.string(),
+    state: z.object({ name: z.string(), type: z.string(), color: z.string() }).loose(),
+  })
+  .loose();
 
 export const rpcContract = defineRpcContract({
   status: {
@@ -184,6 +194,23 @@ export const rpcContract = defineRpcContract({
   pr_auto_merge: {
     input: z.object({ key: prKeySchema, enabled: z.boolean(), method: z.enum(["MERGE", "SQUASH", "REBASE"]) }).strict(),
     output: z.object({ ok: z.literal(true) }),
+  },
+  // The Linear issues a PR resolves, read through the Linear plugin when it's
+  // installed. installed=false hides the block.
+  pr_linear_issues: {
+    input: z.object({ key: prKeySchema }).strict(),
+    output: z.object({
+      installed: z.boolean(),
+      pluginId: z.string().nullable(),
+      issues: z.array(
+        z.object({
+          identifier: z.string(),
+          title: z.string(),
+          url: z.string(),
+          state: z.object({ name: z.string(), type: z.string(), color: z.string() }),
+        }),
+      ),
+    }),
   },
   // Thread ↔ PR links. A stored link wins over the branch lookup; a stored
   // null is an explicit unlink that hides it.
@@ -362,6 +389,13 @@ export default async function plugin(bb: BbPluginApi) {
       throw new Error(`GitHub ${method} failed with HTTP ${response.status}${json?.message ? `: ${json.message}` : ""}${errors}`);
     }
     return json as T;
+  }
+
+  // The Linear plugin's id: the published one first, then a dev build.
+  async function linearPluginId(): Promise<string | null> {
+    const plugins = await bb.sdk.plugins.list().catch(() => null);
+    const enabled = (plugins?.plugins ?? []).filter((plugin) => plugin.enabled && plugin.id.startsWith("linear"));
+    return (enabled.find((plugin) => plugin.id === "linear-issues") ?? enabled[0])?.id ?? null;
   }
 
   async function prState(ref: PrRef) {
@@ -633,6 +667,24 @@ export default async function plugin(bb: BbPluginApi) {
         await github(`mutation NoAuto($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }`, { id: pr.id });
       }
       return { ok: true as const };
+    },
+    pr_linear_issues: async ({ key }) => {
+      const pluginId = await linearPluginId();
+      if (pluginId === null) return { installed: false, pluginId: null, issues: [] };
+      const detail = await getPullRequest(key);
+      const identifiers = linearIdentifiers(detail);
+      // A look-alike that isn't a real ticket just comes back "not found".
+      const results = await Promise.all(
+        identifiers.map((identifier) =>
+          bb.sdk.plugins
+            .callRpc({ pluginId, method: "issue_get", input: { id: identifier }, outputSchema: linearIssueSchema })
+            .catch(() => null),
+        ),
+      );
+      const issues = results
+        .filter((issue): issue is z.infer<typeof linearIssueSchema> => issue !== null)
+        .map(({ identifier, title, url, state }) => ({ identifier, title, url, state: { name: state.name, type: state.type, color: state.color } }));
+      return { installed: true, pluginId, issues };
     },
     pr_set_state: async ({ key, state }) => {
       const pr = await prState(key);
