@@ -160,10 +160,9 @@ function presentation(pr: PluginSidebarPullRequest): { glyph: PrGlyph; className
     case "draft":
       return { glyph: "draft", className: "text-muted-foreground/60", label: "Draft" };
     default:
-      if (pr.attention === "checks_failed") return { glyph: "open", className: "text-rose-500/85", label: "Open, checks failing" };
-      if (pr.attention === "checks_pending") return { glyph: "open", className: "text-amber-500/85", label: "Open, checks running" };
-      if (pr.attention === "conflicts") return { glyph: "open", className: "text-rose-500/85", label: "Open, has conflicts" };
-      return { glyph: "open", className: "text-emerald-500/80", label: pr.attention === "ready_to_merge" ? "Ready to merge" : "Open" };
+      // An open PR is always green: red read as "closed" at sidebar size.
+      // What it's waiting on (checks, conflicts…) lives in the hover card.
+      return { glyph: "open", className: "text-emerald-500/85", label: ATTENTION_LABEL[pr.attention] ? `Open, ${ATTENTION_LABEL[pr.attention]!.toLowerCase()}` : "Open" };
   }
 }
 
